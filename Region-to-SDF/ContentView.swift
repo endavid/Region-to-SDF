@@ -13,11 +13,12 @@ import CoreImage.CIFilterBuiltins
 struct ContentView: View {
     @State private var droppedImage: NSImage? = nil
     @State private var displayedImage: Image? = nil
-    @State private var samplingBitmap: NSBitmapImageRep? = nil
+    @State private var imageSampler: ImageSampler?
 
     @State private var palette: [Color] = []
     @State private var lastTapPoint: CGPoint? = nil
     @State private var lastImageRect: CGRect = .zero
+    
 
     var body: some View {
         NavigationStack {
@@ -65,19 +66,14 @@ struct ContentView: View {
                     Text("Color Picker Canvas")
                         .font(.headline)
                     ZStack(alignment: .topLeading) {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.underPageBackgroundColor))
                         if let displayedImage {
                             GeometryReader { geo in
                                 ZStack {
                                     displayedImage
                                         .resizable()
                                         .scaledToFit()
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
                                         .overlay(
                                             ZStack {
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                                                 // Crosshair overlay limited to the drawn image rect
                                                 GeometryReader { innerGeo in
                                                     let containerSize = innerGeo.size
@@ -88,7 +84,7 @@ struct ContentView: View {
                                                     let imgRect = CGRect(origin: origin, size: drawnSize)
                                                     Color.clear
                                                         .onAppear { lastImageRect = imgRect }
-                                                        .onChange(of: containerSize) { _ in lastImageRect = imgRect }
+                                                        .onChange(of: containerSize) { lastImageRect = imgRect }
                                                     if let p = lastTapPoint, imgRect.contains(p) {
                                                         // Vertical line
                                                         Path { path in
@@ -117,7 +113,7 @@ struct ContentView: View {
                                                 .onEnded { value in
                                                     let tapPoint = value.location
                                                     self.lastTapPoint = tapPoint
-                                                    sampleColor(at: tapPoint, in: geo)
+                                                    sampleColor(at: tapPoint)
                                                 }
                                         )
                                 }
@@ -208,38 +204,25 @@ struct ContentView: View {
         DispatchQueue.main.async {
             self.droppedImage = nsImage
             self.displayedImage = Image(nsImage: nsImage)
-            self.samplingBitmap = nsImage.bestBitmapRep()
+            self.imageSampler = ImageSampler(image: nsImage)
         }
     }
 
     // MARK: - Color Sampling
-    private func sampleColor(at tapPoint: CGPoint, in geo: GeometryProxy) {
-        guard let nsImage = droppedImage, let bitmap = samplingBitmap else { return }
+    private func sampleColor(at tapPoint: CGPoint) {
+        guard let sampler = imageSampler else { return }
 
-        // Compute image rect inside the GeometryReader with .scaledToFit
-        let containerSize = geo.size
-        let imageSize = nsImage.size
-        let scale = min(containerSize.width / imageSize.width, containerSize.height / imageSize.height)
-        let drawnSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
-        let origin = CGPoint(x: (containerSize.width - drawnSize.width) / 2, y: (containerSize.height - drawnSize.height) / 2)
-        let imageRect = CGRect(origin: origin, size: drawnSize)
-        self.lastImageRect = imageRect
-
-        guard imageRect.contains(tapPoint) else { return }
-
-        // Map tapPoint to pixel coordinates in the original image
-        let relative = CGPoint(x: (tapPoint.x - imageRect.minX) / imageRect.width,
-                               y: (tapPoint.y - imageRect.minY) / imageRect.height)
-        let pxWidth = bitmap.pixelsWide
-        let pxHeight = bitmap.pixelsHigh
-        let pixelX = min(max(Int((relative.x * CGFloat(pxWidth)).rounded(.down)), 0), pxWidth - 1)
-        let pixelYFromBottom = min(max(Int((relative.y * CGFloat(pxHeight)).rounded(.down)), 0), pxHeight - 1)
-        let pixelY = pxHeight - 1 - pixelYFromBottom
-
-        if let color = bitmap.colorAt(x: pixelX, y: pixelY) {
-            DispatchQueue.main.async {
-                palette.append(Color(nsColor: color))
-            }
+        // (u,v) where top-left is (0,0)
+        let u = Float(tapPoint.x / lastImageRect.width)
+        let v = Float(tapPoint.y / lastImageRect.height)
+        
+        let sample: (r: UInt8, g: UInt8, b: UInt8, a: UInt8) = sampler.uvSampler(u: u, v: v)
+        
+        logDebug("Tap: \(tapPoint) UV(\(u), \(v)) color: \(sample)")
+        
+        let nsColor = NSColor(r: sample.r, g: sample.g, b: sample.b, a: sample.a)
+        DispatchQueue.main.async {
+            addToPalette(Color(nsColor: nsColor))
         }
     }
 
@@ -250,6 +233,16 @@ struct ContentView: View {
 
     private func deletePalette(at offsets: IndexSet) {
         palette.remove(atOffsets: offsets)
+    }
+    
+    private func addToPalette(_ color: Color) {
+        for c in palette {
+            if c == color {
+                logDebug("Color already in palette")
+                return
+            }
+        }
+        palette.append(color)
     }
 }
 
