@@ -313,38 +313,13 @@ struct ContentView: View {
         }
         palette.append(color)
     }
-    
-    // MARK: - SDFs
-    private func generateSDF(paletteIndex: Int) {
-        if paletteIndex >= palette.count {
-            logDebug("index \(paletteIndex) out of range: \(palette.count) colors")
-            return
-        }
-        guard let imageSampler else {
-            logDebug("No image sampler")
-            return
-        }
-        let epsilon: Float = 5.0 / 255.0
-        let color = palette[paletteIndex].colorTuple
-        let sdf = RegionalSDF(sampler: imageSampler, regionColor: color, epsilon: epsilon)
-        do {
-            try sdf.computeSDF()
-            // @todo append sdf to list
-            let cgImage = sdf.toRGImage().toCGImage()
-            // @todo append cgImage to "SDF images" region in the UI
-        } catch {
-            Logger.shared.err(error.localizedDescription)
-        }
         
-        
-    }
-    
     // MARK: - SDF Batch Generation
     private func makeSDF(for color: Color, sampler: ImageSampler, epsilon: Float) throws -> (RegionalSDF, CGImage?) {
         let tuple = color.colorTuple
         let sdf = RegionalSDF(sampler: sampler, regionColor: tuple, epsilon: epsilon)
         try sdf.computeSDF()
-        let cg = sdf.toRGImage().toCGImage()
+        let cg = sdf.toRGImage(maxContrast: true).toCGImage()
         return (sdf, cg)
     }
     

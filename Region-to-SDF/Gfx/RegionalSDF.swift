@@ -36,34 +36,31 @@ class RegionalSDF {
     /// Raster algorithm to compute SDF.
     /// I go in raster order to find region borders, and then iterate until all the image is filled with distances.
     func computeSDF(debugIterationFn: ((Int)->())? = nil) throws {
-        var missingData = distances.width * distances.height
-        var newMissingData = 0
+        var missingData = 0
         var iteration: Int = 0
+        var changed = distances.width * distances.height
         if let fn = debugIterationFn {
             fn(iteration)
         }
-        while missingData != newMissingData {
+        while changed > 0 {
             iteration += 1
-            missingData = newMissingData
-            newMissingData = 0
+            missingData = 0
+            changed = 0
             for y in 0..<distances.height {
                 for x in 0..<distances.width {
                     let c = (x, y)
                     let v = get(coord: c)
                     let d = abs(v)
-                    if d < RegionalSDF.BigValue {
-                        // already computed
-                        continue
-                    }
                     var neighbors = getNeighbors(c, isOutside: v > 0)
                     if neighbors.isEmpty {
                         continue
                     }
                     neighbors.sort { $0.cost < $1.cost }
                     let best = neighbors.first!.cost
-                    if best < RegionalSDF.BigValue {
+                    if best < d {
                         distances.setValue(v > 0 ? best : -best, at: c)
-                    } else {
+                        changed += 1
+                    } else if d == RegionalSDF.BigValue {
                         missingData += 1
                     }
                 }
@@ -131,19 +128,30 @@ class RegionalSDF {
         return img
     }
     
-    func toRGImage() -> SimpleImage<UInt32> {
+    func toRGImage(maxContrast: Bool = false) -> SimpleImage<UInt32> {
         let w = distances.width
         let h = distances.height
         var img = SimpleImage<UInt32>(width: w, height: h)
         // hypotenuse
         let maxDistance = sqrtf(Float(w * w + h * h))
+        var maxRed = maxDistance
+        var minGreen = -maxDistance
+        if maxContrast {
+            maxRed = distances.data.reduce(0) { max, value in
+                let d = min(value, maxDistance)
+                return max > d ? max : d
+            }
+            minGreen = distances.data.reduce(0) { minV, value in
+                let d = max(value, -maxDistance)
+                return minV < d ? minV : d
+            }
+        }
         img.data = distances.data.map { value in
             // -1..1
-            let normalized = value / maxDistance
-            let positive = Clamp(normalized, low: 0, high: 1)
-            let negative = Clamp(normalized, low: -1, high: 0)
+            let positive = Clamp(value / maxRed, low: 0, high: 1)
+            let negative = Clamp(value / minGreen, low: 0, high: 1)
             let r = UInt32(roundf(255.0 * positive))
-            let g = UInt32(roundf(255.0 * abs(negative)))
+            let g = UInt32(roundf(255.0 * negative))
             return UInt32(r << 24 | g << 16 | 0x00ff)
         }
         return img

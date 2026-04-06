@@ -42,7 +42,7 @@ struct Region_to_SDFTests {
         // outside the region = ∞
         #expect(regionalSDF.get(coord: (0, 0)) == RegionalSDF.BigValue)
         try regionalSDF.computeSDF() { iteration in
-            guard let cgImage = regionalSDF.toRGImage().toCGImage() else {
+            guard let cgImage = regionalSDF.toRGImage(maxContrast: true).toCGImage() else {
                 print("Failed to get image for iteration \(iteration)")
                 return
             }
@@ -54,7 +54,7 @@ struct Region_to_SDFTests {
                 // Fallback on earlier versions
             }
         }
-        #expect(regionalSDF.get(coord: (15, 15)) == -4.0)
+        #expect(IsClose(regionalSDF.get(coord: (15, 15)), -3.83, epsilon: 0.01))
     }
 
     // Helper to get the test bundle via class lookup
