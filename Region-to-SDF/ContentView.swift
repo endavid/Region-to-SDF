@@ -19,6 +19,8 @@ struct ContentView: View {
     @State private var lastTapPoint: CGPoint? = nil
     @State private var lastImageRect: CGRect = .zero
     
+    @State private var generatedSDFs: [RegionalSDF] = []
+    @State private var generatedCGImages: [CGImage] = []
 
     var body: some View {
         NavigationStack {
@@ -61,18 +63,40 @@ struct ContentView: View {
                                 handleDrop(providers: providers)
                             }
                         } // VStack image well
-                        Button(action: {}) {
-                                Image(systemName: "wand.and.rays")
-                                Text("Compute SDFs")
-                                  .padding(.horizontal)
-                              }
-                              .padding()
-                              .foregroundColor(.secondary)
-                              .cornerRadius(10)
+                        Button(action: {
+                            Task { await computeAllSDFs() }
+                        }) {
+                            Image(systemName: "wand.and.rays")
+                            Text("Compute SDFs")
+                              .padding(.horizontal)
+                          }
+                          .padding()
+                          .foregroundColor(.secondary)
+                          .cornerRadius(10)
                     } // HStack top
-                    VStack {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("SDF images")
                             .font(.headline)
+                        if generatedCGImages.isEmpty {
+                            Text("No SDF images yet").foregroundStyle(.secondary)
+                        } else {
+                            let columns = [GridItem(.adaptive(minimum: 96), spacing: 8, alignment: .top)]
+                            ScrollView {
+                                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                                    ForEach(Array(generatedCGImages.enumerated()), id: \.offset) { _, cg in
+                                        Image(decorative: cg, scale: 1, orientation: .up)
+                                            .resizable()
+                                            .interpolation(.none)
+                                            .antialiased(false)
+                                            .scaledToFit()
+                                            .frame(maxWidth: 160, maxHeight: 160)
+                                            .background(Color(.underPageBackgroundColor))
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
+                                    }
+                                }
+                            }
+                        }
                     }
                 } // VStack left
                 .frame(maxWidth: .infinity, alignment: .top)
@@ -178,7 +202,7 @@ struct ContentView: View {
                     .toolbar {
                         ToolbarItem(placement: .automatic) {
                             Button(role: .destructive) {
-                                palette.removeAll()
+                                clear()
                             } label: {
                                 Label("Clear Palette", systemImage: "trash")
                             }
@@ -221,7 +245,14 @@ struct ContentView: View {
             self.droppedImage = nsImage
             self.displayedImage = Image(nsImage: nsImage)
             self.imageSampler = ImageSampler(image: nsImage)
+            self.clear()
         }
+    }
+    
+    private func clear() {
+        palette.removeAll()
+        generatedSDFs.removeAll()
+        generatedCGImages.removeAll()
     }
 
     // MARK: - Color Sampling
@@ -284,6 +315,71 @@ struct ContentView: View {
         }
         
         
+    }
+    
+    // MARK: - SDF Batch Generation
+    private func makeSDF(for color: Color, sampler: ImageSampler, epsilon: Float) throws -> (RegionalSDF, CGImage?) {
+        let tuple = color.colorTuple
+        let sdf = RegionalSDF(sampler: sampler, regionColor: tuple, epsilon: epsilon)
+        try sdf.computeSDF()
+        let cg = sdf.toRGImage().toCGImage()
+        return (sdf, cg)
+    }
+
+    @MainActor
+    private func resetGeneratedOutputs() {
+        generatedSDFs.removeAll()
+        generatedCGImages.removeAll()
+    }
+
+    private func computeEpsilon() -> Float { 5.0 / 255.0 }
+
+    private func computeAllSDFsSync() throws -> (sdfs: [RegionalSDF], images: [CGImage]) {
+        guard let imageSampler else { throw NSError(domain: "RegionToSDF", code: 1, userInfo: [NSLocalizedDescriptionKey: "No image sampler"]) }
+        let epsilon = computeEpsilon()
+        var sdfs: [RegionalSDF] = []
+        var images: [CGImage] = []
+        for color in palette {
+            let (sdf, cg) = try makeSDF(for: color, sampler: imageSampler, epsilon: epsilon)
+            sdfs.append(sdf)
+            if let cg { images.append(cg) }
+        }
+        return (sdfs, images)
+    }
+
+    private func computeAllSDFsParallel() async -> (sdfs: [RegionalSDF], images: [CGImage]) {
+        guard let imageSampler else { return ([], []) }
+        let epsilon = computeEpsilon()
+        // Run per-color computations in parallel
+        return await withTaskGroup(of: (RegionalSDF?, CGImage?).self) { group in
+            for color in palette {
+                group.addTask {
+                    do {
+                        let (sdf, cg) = try await makeSDF(for: color, sampler: imageSampler, epsilon: epsilon)
+                        return (sdf, cg)
+                    } catch {
+                        await Logger.shared.err("SDF failed: \(error.localizedDescription)")
+                        return (nil, nil)
+                    }
+                }
+            }
+            var sdfs: [RegionalSDF] = []
+            var images: [CGImage] = []
+            for await result in group {
+                if let sdf = result.0 { sdfs.append(sdf) }
+                if let cg = result.1 { images.append(cg) }
+            }
+            return (sdfs, images)
+        }
+    }
+
+    private func computeAllSDFs() async {
+        await MainActor.run { resetGeneratedOutputs() }
+        let (sdfs, images) = await computeAllSDFsParallel()
+        await MainActor.run {
+            self.generatedSDFs = sdfs
+            self.generatedCGImages = images
+        }
     }
 }
 
