@@ -21,6 +21,9 @@ struct ContentView: View {
     
     @State private var generatedSDFs: [RegionalSDF] = []
     @State private var generatedCGImages: [CGImage] = []
+    
+    @State private var maxColorDifference: Double = 5 // 0..128
+    @State private var isExporting: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -63,16 +66,35 @@ struct ContentView: View {
                                 handleDrop(providers: providers)
                             }
                         } // VStack image well
-                        Button(action: {
-                            Task { await computeAllSDFs() }
-                        }) {
-                            Image(systemName: "wand.and.rays")
-                            Text("Compute SDFs")
-                              .padding(.horizontal)
-                          }
-                          .padding()
-                          .foregroundColor(.secondary)
-                          .cornerRadius(10)
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            // Epsilon slider
+                            Text("Max color difference").font(.subheadline)
+                            HStack(spacing: 8) {
+                                Slider(value: $maxColorDifference, in: 0...128, step: 1)
+                                Text("\(Int(maxColorDifference))")
+                                    .monospacedDigit()
+                                    .frame(width: 32, alignment: .trailing)
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 8)
+
+                            // Actions
+                            Button(action: {
+                                Task { await computeAllSDFs() }
+                            }) {
+                                Image(systemName: "wand.and.rays")
+                                Text("Compute SDFs")
+                            }
+                            .disabled(palette.isEmpty)
+
+                            Button(action: { exportGeneratedImages() }) {
+                                Image(systemName: "square.and.arrow.up")
+                                Text("Export Images")
+                            }
+                            .disabled(generatedCGImages.isEmpty)
+                        }
+                        .frame(alignment: .leading)
                     } // HStack top
                     VStack(alignment: .leading, spacing: 8) {
                         Text("SDF images")
@@ -325,6 +347,34 @@ struct ContentView: View {
         let cg = sdf.toRGImage().toCGImage()
         return (sdf, cg)
     }
+    
+    private func exportGeneratedImages() {
+        guard !generatedCGImages.isEmpty else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.title = "Choose export folder"
+        panel.message = "Export generated SDF images as PNG"
+        if panel.runModal() == .OK, let url = panel.url {
+            exportImages(to: url)
+        }
+    }
+
+    private func exportImages(to folderURL: URL) {
+        for (idx, cg) in generatedCGImages.enumerated() {
+            let fileURL = folderURL.appendingPathComponent(String(format: "sdf_%03d.png", idx))
+            if let dest = CGImageDestinationCreateWithURL(fileURL as CFURL, UTType.png.identifier as CFString, 1, nil) {
+                CGImageDestinationAddImage(dest, cg, nil)
+                if !CGImageDestinationFinalize(dest) {
+                    Logger.shared.err("Failed to write \(fileURL.lastPathComponent)")
+                }
+            } else {
+                Logger.shared.err("Failed to create destination for \(fileURL.path)")
+            }
+        }
+    }
 
     @MainActor
     private func resetGeneratedOutputs() {
@@ -332,7 +382,10 @@ struct ContentView: View {
         generatedCGImages.removeAll()
     }
 
-    private func computeEpsilon() -> Float { 5.0 / 255.0 }
+    private func computeEpsilon() -> Float {
+        // Map 0..128 to 0..(128/255)
+        return Float(maxColorDifference) / 255.0
+    }
 
     private func computeAllSDFsSync() throws -> (sdfs: [RegionalSDF], images: [CGImage]) {
         guard let imageSampler else { throw NSError(domain: "RegionToSDF", code: 1, userInfo: [NSLocalizedDescriptionKey: "No image sampler"]) }
