@@ -25,40 +25,56 @@ struct ContentView: View {
             HStack(alignment: .top, spacing: 16) {
                 // Image Well (Drag & Drop)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Image Well")
-                        .font(.headline)
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                            .foregroundStyle(.secondary)
-                            .background(
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Region Image")
+                                .font(.headline)
+                            ZStack {
                                 RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(.windowBackgroundColor))
-                            )
-                        if let displayedImage {
-                            displayedImage
-                                .resizable()
-                                .scaledToFit()
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .padding(4)
-                        } else {
-                            VStack(spacing: 6) {
-                                Image(systemName: "tray.and.arrow.down")
-                                    .font(.system(size: 28, weight: .regular))
-                                    .symbolRenderingMode(.hierarchical)
-                                Text("Drag & drop an image here")
-                                    .font(.subheadline)
+                                    .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6]))
                                     .foregroundStyle(.secondary)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color(.windowBackgroundColor))
+                                    )
+                                if let displayedImage {
+                                    displayedImage
+                                        .resizable()
+                                        .scaledToFit()
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .padding(4)
+                                } else {
+                                    VStack(spacing: 6) {
+                                        Image(systemName: "tray.and.arrow.down")
+                                            .font(.system(size: 28, weight: .regular))
+                                            .symbolRenderingMode(.hierarchical)
+                                        Text("Drag & drop an image here")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding()
+                                }
+                            } // ZStack
+                            .frame(minWidth: 80, maxWidth: 240, minHeight: 80, maxHeight: 240)
+                            .contentShape(Rectangle())
+                            .onDrop(of: [UTType.image, UTType.fileURL], isTargeted: nil) { providers in
+                                handleDrop(providers: providers)
                             }
-                            .padding()
-                        }
+                        } // VStack image well
+                        Button(action: {}) {
+                                Image(systemName: "wand.and.rays")
+                                Text("Compute SDFs")
+                                  .padding(.horizontal)
+                              }
+                              .padding()
+                              .foregroundColor(.secondary)
+                              .cornerRadius(10)
+                    } // HStack top
+                    VStack {
+                        Text("SDF images")
+                            .font(.headline)
                     }
-                    .frame(minWidth: 260, maxWidth: 420, minHeight: 260)
-                    .contentShape(Rectangle())
-                    .onDrop(of: [UTType.image, UTType.fileURL], isTargeted: nil) { providers in
-                        handleDrop(providers: providers)
-                    }
-                }
+                } // VStack left
                 .frame(maxWidth: .infinity, alignment: .top)
 
                 // Color Picking Canvas and Palette
@@ -244,40 +260,30 @@ struct ContentView: View {
         }
         palette.append(color)
     }
-}
-
-// MARK: - Helpers
-private extension NSImage {
-    func bestBitmapRep() -> NSBitmapImageRep? {
-        // Try to get an existing bitmap rep
-        if let rep = self.representations.compactMap({ $0 as? NSBitmapImageRep }).first {
-            return rep
+    
+    // MARK: - SDFs
+    private func generateSDF(paletteIndex: Int) {
+        if paletteIndex >= palette.count {
+            logDebug("index \(paletteIndex) out of range: \(palette.count) colors")
+            return
         }
-        // Otherwise, draw into a bitmap context
-        let size = self.size
-        guard let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int(size.width),
-            pixelsHigh: Int(size.height),
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else { return nil }
-
-        NSGraphicsContext.saveGraphicsState()
-        if let ctx = NSGraphicsContext(bitmapImageRep: rep) {
-            NSGraphicsContext.current = ctx
-            ctx.cgContext.interpolationQuality = .high
-            self.draw(in: CGRect(origin: .zero, size: size))
-            NSGraphicsContext.restoreGraphicsState()
-            return rep
+        guard let imageSampler else {
+            logDebug("No image sampler")
+            return
         }
-        NSGraphicsContext.restoreGraphicsState()
-        return nil
+        let epsilon: Float = 5.0 / 255.0
+        let color = palette[paletteIndex].colorTuple
+        let sdf = RegionalSDF(sampler: imageSampler, regionColor: color, epsilon: epsilon)
+        do {
+            try sdf.computeSDF()
+            // @todo append sdf to list
+            let cgImage = sdf.toRGImage().toCGImage()
+            // @todo append cgImage to "SDF images" region in the UI
+        } catch {
+            Logger.shared.err(error.localizedDescription)
+        }
+        
+        
     }
 }
 

@@ -12,21 +12,6 @@ import UIKit
 import Cocoa
 #endif
 
-// https://docs.swift.org/swift-book/ReferenceManual/Expressions.html
-// https://stackoverflow.com/a/24402688/1765629
-func logFunctionName(file: String = #file, fn: String = #function) {
-    #if DEBUG
-    let base = (file as NSString).lastPathComponent
-    NSLog("\(base): \(fn)")
-    #endif
-}
-
-func logDebug(_ text: String) {
-    #if DEBUG
-    NSLog(text)
-    #endif
-}
-
 func openURL(_ urlString: String) {
     guard let url = URL(string: urlString) else {
         NSLog("Bad URL: \(urlString)")

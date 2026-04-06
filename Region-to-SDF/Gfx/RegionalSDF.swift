@@ -20,13 +20,13 @@ class RegionalSDF {
         return distances.getValue(coord)
     }
     
-    init(sampler: ImageSampler, regionColor: UintColorTuple) {
+    init(sampler: ImageSampler, regionColor: UintColorTuple, epsilon: Float = 5.0 / 255.0) {
         distances = SimpleImage<Float>(width: sampler.width, height: sampler.height, value: 0)
         for y in 0..<sampler.height {
             for x in 0..<sampler.width {
                 let sample: UintColorTuple = sampler.get(coord: (x, y))
                 // very big distances, but negative if inside the region
-                let v: Float = IsClose(sample, regionColor) ? -RegionalSDF.BigValue : RegionalSDF.BigValue
+                let v: Float = IsClose(sample, regionColor, epsilon: epsilon) ? -RegionalSDF.BigValue : RegionalSDF.BigValue
                 distances.setValue(v, at: (x,y))
             }
         }
