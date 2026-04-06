@@ -38,8 +38,20 @@ class ImageSampler {
     }
     
     /// u, v: 0..1; top-left corner = (0,0) (in OpenGL it would be 0,1)
-    func uvSampler<T: Number>(u: Float, v: Float) -> (r: T, g: T, b: T, a: T) {
+    func get<T: Number>(u: Float, v: Float) -> (r: T, g: T, b: T, a: T) {
         let k = getOffset(u: u, v: v)
+        return get(k)
+    }
+    
+    func get<T: Number>(coord: Coord2D) -> (r: T, g: T, b: T, a: T) {
+        // clamp to borders by default
+        let x = Clamp(coord.x, low: 0, high: width-1)
+        let y = Clamp(coord.y, low: 0, high: height-1)
+        let k = bytesPerRow * y + bytesPerPixel * x
+        return get(k)
+    }
+        
+    private func get<T: Number>(_ k: Int) -> (r: T, g: T, b: T, a: T) {
         let ptr : UnsafePointer<UInt8> = CFDataGetBytePtr(imgData)
         switch bitsPerComponent {
         case 8:

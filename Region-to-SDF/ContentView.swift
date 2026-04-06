@@ -216,11 +216,11 @@ struct ContentView: View {
         let u = Float(tapPoint.x / lastImageRect.width)
         let v = Float(tapPoint.y / lastImageRect.height)
         
-        let sample: (r: UInt8, g: UInt8, b: UInt8, a: UInt8) = sampler.uvSampler(u: u, v: v)
+        let sample: UintColorTuple = sampler.get(u: u, v: v)
         
         logDebug("Tap: \(tapPoint) UV(\(u), \(v)) color: \(sample)")
         
-        let nsColor = NSColor(r: sample.r, g: sample.g, b: sample.b, a: sample.a)
+        let nsColor = NSColor(sample)
         DispatchQueue.main.async {
             addToPalette(Color(nsColor: nsColor))
         }
@@ -238,7 +238,7 @@ struct ContentView: View {
     private func addToPalette(_ color: Color) {
         for c in palette {
             if c == color {
-                logDebug("Color already in palette")
+                logDebug("Color \(color.hexDescription()) already in palette")
                 return
             }
         }
@@ -278,22 +278,6 @@ private extension NSImage {
         }
         NSGraphicsContext.restoreGraphicsState()
         return nil
-    }
-}
-
-private extension Color {
-    func hexDescription() -> String {
-        #if canImport(AppKit)
-        // Convert to sRGB NSColor to get components
-        let ns = NSColor(self)
-        guard let conv = ns.usingColorSpace(.sRGB) else { return "#??????" }
-        let r = Int(round(conv.redComponent * 255))
-        let g = Int(round(conv.greenComponent * 255))
-        let b = Int(round(conv.blueComponent * 255))
-        return String(format: "#%02X%02X%02X", r, g, b)
-        #else
-        return "#??????"
-        #endif
     }
 }
 

@@ -21,6 +21,14 @@ func DegToRad(_ angle: Float) -> Float {
 func IsClose(_ a: Float, _ b: Float, epsilon: Float = 0.0001) -> Bool {
     return ( fabsf( a - b ) < epsilon )
 }
+/// Compares 2 colors, ignoring alpha
+func IsClose(_ a: UintColorTuple, _ b: UintColorTuple, epsilon: Float = 0.001) -> Bool {
+    let r = Float(a.r) - Float(b.r)
+    let g = Float(a.g) - Float(b.g)
+    let b = Float(a.b) - Float(b.b)
+    return r * r + g * g + b * b < epsilon * epsilon
+}
+
 /// Gets the sign of a number
 func Sign(_ n: Float) -> Float {
     return (n>=0) ?1:-1
