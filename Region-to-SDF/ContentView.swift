@@ -319,7 +319,8 @@ struct ContentView: View {
         let tuple = color.colorTuple
         let sdf = RegionalSDF(sampler: sampler, regionColor: tuple, epsilon: epsilon)
         try sdf.computeSDF()
-        let cg = sdf.toRGImage(maxContrast: true).toCGImage()
+        //let cg = sdf.toRGImage(maxContrast: true).toCGImage()
+        let cg = sdf.toGrayImage().toCGImage()
         return (sdf, cg)
     }
     

@@ -10,7 +10,7 @@ import ImageIO
 import UniformTypeIdentifiers
 
 
-struct SimpleImage<T: Number> {
+struct SimpleImage<T> {
     let width: Int
     let height: Int
     
@@ -52,8 +52,12 @@ struct SimpleImage<T: Number> {
             (p.x + 1, p.y - 1),
             (p.x + 1, p.y + 1)]
     }
+    func get8ValidNeighbors(_ p: Coord2D) -> [Coord2D] {
+        let all = get4Neighbors(p) + get4Diagonals(p)
+        return all.filter { isValid($0) }
+    }
     
-    init(width: Int, height: Int, value: T = 0) {
+    init(width: Int, height: Int, repeating value: T) {
         self.width = width
         self.height = height
         self.data = [T].init(repeating: value, count: width * height)
@@ -102,6 +106,50 @@ extension SimpleImage where T == UInt32 {
             imageBytes[4 * i + 1] = UInt8((c >> 16) & 0x0000ff)
             imageBytes[4 * i + 2] = UInt8((c >> 8) & 0x0000ff)
             imageBytes[4 * i + 3] = UInt8(c & 0x0000ff)
+        }
+        guard let provider = CGDataProvider(data: NSData(bytes: &imageBytes, length: pixelCount * bytesPerPixel * MemoryLayout<UInt8>.size)) else {
+            return nil
+        }
+        let bitmapInfo:CGBitmapInfo = [.byteOrder32Big, CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue)]
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: bitsPerComponent,
+            bitsPerPixel: bytesPerPixel * bitsPerComponent,
+            bytesPerRow: width * bytesPerPixel,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+            )
+    }
+}
+
+extension SimpleImage where T == Int {
+    func indexToUVTexture() -> CGImage? {
+        let bytesPerPixel = 4
+        let pixelCount = width * height
+        let bitsPerComponent = 8
+        var imageBytes = [UInt8].init(repeating: 0, count: pixelCount * bytesPerPixel)
+        for i in 0..<data.count {
+            let index = data[i]
+            if index < 0 {
+                // unexpected
+                imageBytes[4 * i] = 0
+                imageBytes[4 * i + 1] = 0
+                imageBytes[4 * i + 2] = 255
+                imageBytes[4 * i + 3] = 255
+                continue
+            }
+            let coord = indexToCoord(index)
+            let u = 255.0 * Float(coord.x) / Float(width - 1)
+            let v = 255.0 * Float(coord.y) / Float(height - 1)
+            imageBytes[4 * i] = UInt8(u)
+            imageBytes[4 * i + 1] = UInt8(v)
+            imageBytes[4 * i + 2] = 0
+            imageBytes[4 * i + 3] = 255
         }
         guard let provider = CGDataProvider(data: NSData(bytes: &imageBytes, length: pixelCount * bytesPerPixel * MemoryLayout<UInt8>.size)) else {
             return nil

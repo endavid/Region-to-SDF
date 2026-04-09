@@ -12,6 +12,16 @@ import AppKit
 @testable import Region_to_SDF
 
 struct Region_to_SDFTests {
+    
+    func saveImage(_ cgImage: CGImage, path: String) {
+        let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(path)
+        if #available(macOS 13.0, iOS 14.0, *) {
+            CGImageWriteToFile(cgImage, filename: outputURL)
+            print("✅ Saved iteration image to \(outputURL.path)")
+        } else {
+            // Fallback on earlier versions
+        }
+    }
 
     @Test func example() async throws {
         // Write your test here and use APIs like `#expect(...)` to check expected conditions.
@@ -46,15 +56,14 @@ struct Region_to_SDFTests {
                 print("Failed to get image for iteration \(iteration)")
                 return
             }
-            let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent("regionalSDF_test_\(iteration).png")
-            if #available(macOS 13.0, iOS 14.0, *) {
-                CGImageWriteToFile(cgImage, filename: outputURL)
-                print("✅ Saved iteration image to \(outputURL.path)")
-            } else {
-                // Fallback on earlier versions
-            }
+            saveImage(cgImage, path: "regionalSDF_test_\(iteration).png")
         }
         #expect(IsClose(regionalSDF.get(coord: (15, 15)), -3.83, epsilon: 0.01))
+        let closest = regionalSDF.findClosestBorder()
+        if let cgImage = closest.indexToUVTexture() {
+            saveImage(cgImage, path: "regionalSDF_test_closest_uv.png")
+        }
+        #expect(closest.getValue((15, 15)) == 0)
     }
 
     // Helper to get the test bundle via class lookup
