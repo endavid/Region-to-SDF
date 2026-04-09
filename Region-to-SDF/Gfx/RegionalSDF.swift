@@ -17,10 +17,9 @@ class RegionalSDF {
     private var visited: SimpleImage<UInt8>
     private var inside: SimpleImage<UInt8>
     private var closestParent: SimpleImage<Int>
-    
-    func get(coord: Coord2D) -> Float {
-        let sgn: Float = (inside.getValue(coord) == 1) ? -1.0 : 1.0
-        return sgn * distances.getValue(coord)
+        
+    func isInside(_ c: Coord2D) -> Bool {
+        return inside.getValue(c) == 1
     }
     
     func getSDF() -> SimpleImage<Float> {
@@ -29,9 +28,29 @@ class RegionalSDF {
         var sdf = SimpleImage<Float>(width: w, height: h, repeating: RegionalSDF.BigValue)
         for i in 0..<(w*h) {
             let c = distances.indexToCoord(i)
-            sdf.data[i] = get(coord: c)
+            let sgn: Float = (inside.getValue(c) == 1) ? -1.0 : 1.0
+            sdf.data[i] = sgn * distances.getValue(c)
         }
         return sdf
+    }
+    
+    func getEuclideanSDF() -> SimpleImage<Float> {
+        let w = distances.width
+        let h = distances.height
+        var sdf = SimpleImage<Float>(width: w, height: h, repeating: RegionalSDF.BigValue)
+        for i in 0..<(w*h) {
+            let c0 = distances.indexToCoord(i)
+            let p = closestParent.data[i]
+            // p < 0 => not initialized yet
+            let c1 = distances.indexToCoord(p < 0 ? i : p)
+            let sgn: Float = (inside.getValue(c0) == 1) ? -1.0 : 1.0
+            sdf.data[i] = sgn * Length(c1 - c0)
+        }
+        return sdf
+    }
+    
+    func getClosestBorder() -> SimpleImage<Int> {
+        return closestParent
     }
     
     init(sampler: ImageSampler, regionColor: UintColorTuple, epsilon: Float = 5.0 / 255.0) {
@@ -154,12 +173,7 @@ class RegionalSDF {
             if let fn = debugIterationFn { fn(popped) }
         }
     }
-    
-    /// After having found the closest distance, do gradient ascent/descent from every point to find the coordinate/index of the closest border
-    func findClosestBorder() -> SimpleImage<Int> {
-        return closestParent
-    }
-    
+        
     private func getNeighbors(_ c: Coord2D, isOutside: Bool) -> [(p: Coord2D, cost: Float)] {
         let neighbors: [(p: Coord2D, cost: Float)] = distances.get4Neighbors(c).compactMap { n in
             if !distances.isValid(n) {
@@ -199,7 +213,14 @@ class RegionalSDF {
     }
     
     func toGrayImage() -> SimpleImage<UInt8> {
-        let sdf = getSDF()
+        return RegionalSDF.distanceToGrayImage(getEuclideanSDF())
+    }
+    
+    func toRGImage(maxContrast: Bool = false) -> SimpleImage<UInt32> {
+        return RegionalSDF.distanceToRGImage(getEuclideanSDF(), maxContrast: maxContrast)
+    }
+
+    static func distanceToGrayImage(_ sdf: SimpleImage<Float>) -> SimpleImage<UInt8> {
         let w = sdf.width
         let h = sdf.height
         var img = SimpleImage<UInt8>(width: w, height: h, repeating: 0)
@@ -215,8 +236,7 @@ class RegionalSDF {
         return img
     }
     
-    func toRGImage(maxContrast: Bool = false) -> SimpleImage<UInt32> {
-        let sdf = getSDF()
+    static func distanceToRGImage(_ sdf: SimpleImage<Float>, maxContrast: Bool = false) -> SimpleImage<UInt32> {
         let w = sdf.width
         let h = sdf.height
         var img = SimpleImage<UInt32>(width: w, height: h, repeating: 0)
@@ -234,6 +254,12 @@ class RegionalSDF {
                 return minV < d ? minV : d
             }
         }
+        if IsClose(maxRed, 0) {
+            maxRed = 0.001
+        }
+        if IsClose(minGreen, 0) {
+            minGreen = 0.001
+        }
         img.data = sdf.data.map { value in
             // -1..1
             let positive = Clamp(value / maxRed, low: 0, high: 1)
@@ -244,5 +270,5 @@ class RegionalSDF {
         }
         return img
     }
-
 }
+

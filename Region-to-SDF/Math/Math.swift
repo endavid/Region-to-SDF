@@ -62,6 +62,15 @@ func Round(_ a: Double, digits: Int) -> Double {
     let rounded = Int64(a * m)
     return Double(rounded) / m
 }
+
+func -(_ a: Coord2D, _ b: Coord2D) -> Coord2D {
+    return (a.x - b.x, a.y - b.y)
+}
+
+func Length(_ v: Coord2D) -> Float {
+    return sqrtf(Float(v.x * v.x + v.y * v.y))
+}
+
 // Factorial of a number with a cache
 func Factorial(_ n: Int) -> Double { // 64-bit ints aren't enough for big factorials
     struct CacheData {

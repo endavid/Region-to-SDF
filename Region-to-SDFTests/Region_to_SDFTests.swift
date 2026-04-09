@@ -47,19 +47,30 @@ struct Region_to_SDFTests {
         
         let sampler = ImageSampler(image: image)
         let regionalSDF = RegionalSDF(sampler: sampler, regionColor: (r: 47, g: 143, b: 236, a: 255))
-        // inside the region = -∞
-        #expect(regionalSDF.get(coord: (15, 15)) == -RegionalSDF.BigValue)
-        // outside the region = ∞
-        #expect(regionalSDF.get(coord: (0, 0)) == RegionalSDF.BigValue)
+        #expect(regionalSDF.isInside((15, 15)))
+        #expect(!regionalSDF.isInside((0, 0)))
         try regionalSDF.computeSDF() { iteration in
+            if iteration > 10 && (iteration % 10 != 0) {
+                // skip 9 iterations
+                return
+            }
             guard let cgImage = regionalSDF.toRGImage(maxContrast: true).toCGImage() else {
                 print("Failed to get image for iteration \(iteration)")
                 return
             }
             saveImage(cgImage, path: "regionalSDF_test_\(iteration).png")
         }
-        #expect(IsClose(regionalSDF.get(coord: (15, 15)), -2.83, epsilon: 0.01))
-        let closest = regionalSDF.findClosestBorder()
+        let sdf = regionalSDF.getSDF()
+        let euclideanSdf = regionalSDF.getEuclideanSDF()
+        if let cgImage = RegionalSDF.distanceToRGImage(sdf, maxContrast: false).toCGImage() {
+            saveImage(cgImage, path: "regionalSDF_test_sdf.png")
+        }
+        if let cgImage = RegionalSDF.distanceToRGImage(euclideanSdf, maxContrast: false).toCGImage() {
+            saveImage(cgImage, path: "regionalSDF_test_euclidean.png")
+        }
+        #expect(IsClose(sdf.getValue((15,15)), -2.83, epsilon: 0.01))
+        #expect(IsClose(euclideanSdf.getValue((15,15)), -2.83, epsilon: 0.01))
+        let closest = regionalSDF.getClosestBorder()
         if let cgImage = closest.indexToUVTexture() {
             saveImage(cgImage, path: "regionalSDF_test_closest_uv.png")
         }
