@@ -52,6 +52,9 @@ struct SimpleImage<T> {
             (p.x + 1, p.y - 1),
             (p.x + 1, p.y + 1)]
     }
+    func get4ValidNeighbors(_ p: Coord2D) -> [Coord2D] {
+        return get4Neighbors(p).filter { isValid($0) }
+    }
     func get8ValidNeighbors(_ p: Coord2D) -> [Coord2D] {
         let all = get4Neighbors(p) + get4Diagonals(p)
         return all.filter { isValid($0) }
@@ -149,6 +152,38 @@ extension SimpleImage where T == Int {
             imageBytes[4 * i] = UInt8(u)
             imageBytes[4 * i + 1] = UInt8(v)
             imageBytes[4 * i + 2] = 0
+            imageBytes[4 * i + 3] = 255
+        }
+        guard let provider = CGDataProvider(data: NSData(bytes: &imageBytes, length: pixelCount * bytesPerPixel * MemoryLayout<UInt8>.size)) else {
+            return nil
+        }
+        let bitmapInfo:CGBitmapInfo = [.byteOrder32Big, CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue)]
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: bitsPerComponent,
+            bitsPerPixel: bytesPerPixel * bitsPerComponent,
+            bytesPerRow: width * bytesPerPixel,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+            )
+    }
+    
+    func toCGImage(palette: Palette) -> CGImage? {
+        let bytesPerPixel = 4
+        let pixelCount = width * height
+        let bitsPerComponent = 8
+        var imageBytes = [UInt8].init(repeating: 0, count: pixelCount * bytesPerPixel)
+        for i in 0..<data.count {
+            let c = max(0, data[i])
+            let color = palette[min(c, palette.count - 1)]
+            imageBytes[4 * i] = UInt8(color.r)
+            imageBytes[4 * i + 1] = UInt8(color.g)
+            imageBytes[4 * i + 2] = UInt8(color.b)
             imageBytes[4 * i + 3] = 255
         }
         guard let provider = CGDataProvider(data: NSData(bytes: &imageBytes, length: pixelCount * bytesPerPixel * MemoryLayout<UInt8>.size)) else {

@@ -316,8 +316,7 @@ struct ContentView: View {
         
     // MARK: - SDF Batch Generation
     private func makeSDF(for color: Color, sampler: ImageSampler, epsilon: Float) throws -> (RegionalSDF, CGImage?) {
-        let tuple = color.colorTuple
-        let sdf = RegionalSDF(sampler: sampler, regionColor: tuple, epsilon: epsilon)
+        let sdf = RegionalSDF(sampler: sampler, regionColor: color.colorRGB, epsilon: epsilon)
         try sdf.computeSDF()
         //let cg = sdf.toRGImage(maxContrast: true).toCGImage()
         let cg = sdf.toGrayImage().toCGImage()

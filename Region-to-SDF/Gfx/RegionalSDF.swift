@@ -18,6 +18,18 @@ class RegionalSDF {
     private var inside: SimpleImage<UInt8>
     private var closestParent: SimpleImage<Int>
         
+    var width: Int {
+        get {
+            return distances.width
+        }
+    }
+    
+    var height: Int {
+        get {
+            return distances.height
+        }
+    }
+    
     func isInside(_ c: Coord2D) -> Bool {
         return inside.getValue(c) == 1
     }
@@ -53,7 +65,7 @@ class RegionalSDF {
         return closestParent
     }
     
-    init(sampler: ImageSampler, regionColor: UintColorTuple, epsilon: Float = 5.0 / 255.0) {
+    init(sampler: ImageSampler, regionColor: ColorRGB, epsilon: Float = 5.0 / 255.0) {
         let w = sampler.width
         let h = sampler.height
         distances = SimpleImage<Float>(width: w, height: h, repeating: RegionalSDF.BigValue)
@@ -64,7 +76,7 @@ class RegionalSDF {
         for y in 0..<h {
             for x in 0..<w {
                 let s: UintColorTuple = sampler.get(coord: (x, y))
-                let isIn = IsClose(s, regionColor, epsilon: epsilon) ? UInt8(1) : UInt8(0)
+                let isIn = IsClose(ColorRGB(s), regionColor, epsilon: epsilon) ? UInt8(1) : UInt8(0)
                 inside.setValue(isIn, at: (x,y))
             }
         }
@@ -269,6 +281,165 @@ class RegionalSDF {
             return UInt32(r << 24 | g << 16 | 0x00ff)
         }
         return img
+    }
+
+    // MARK: - Boundary contour extraction (8-connected)
+    func extractBoundaryContour() -> [Coord2D] {
+        let w = inside.width
+        let h = inside.height
+        var boundarySet = Set<Int>()
+        // Collect boundary pixels
+        for y in 0..<h {
+            for x in 0..<w {
+                let c = (x,y)
+                if inside.getValue(c) == 0 {
+                    // outside
+                    continue
+                }
+                // image borders count as contour
+                let inCount = inside.get4ValidNeighbors(c).map { inside.getValue($0) }.reduce(0, +)
+                if inCount < 4 { boundarySet.insert(inside.index(c)) }
+            }
+        }
+        // for early debugging:
+        //return boundarySet.map { inside.indexToCoord($0) }
+        // sort it to make it deterministic -- otherwise the tests give different results depending on the starting point
+        guard let startIdx = boundarySet.sorted().first else { return [] }
+        var contour: [Coord2D] = []
+        let firstElement = inside.indexToCoord(startIdx)
+        var current = firstElement
+        // 8-neighborhood offsets in clockwise order
+        let offsets: [Coord2D] = [(-1,-1),(0,-1),(1,-1),(1,0),(1,1),(0,1),(-1,1),(-1,0)]
+        // Trace the boundary until we return to start or run out
+        var prevDir = 0
+        var backtrackStack: [(coord: Coord2D, directionIdx: Int)] = []
+        var found = true
+        while found && contour.count < w*h {
+            let currentIndex = inside.index(current)
+            contour.append(current)
+            boundarySet.remove(currentIndex)
+            found = false
+            // Try neighbors, preferring continuing direction first
+            var candidates: [(coord: Coord2D, directionIdx: Int)] = []
+            var sawFirst = false
+            for k in 0..<offsets.count {
+                let idx = (prevDir + k) % offsets.count
+                let n = (current.x + offsets[idx].x, current.y + offsets[idx].y)
+                if !inside.isValid(n) { continue }
+                if n == firstElement {
+                    sawFirst = true
+                } else if boundarySet.contains(inside.index(n)) {
+                    candidates.append((n, idx))
+                }
+            }
+            if let c = candidates.first {
+                current = c.coord
+                prevDir = c.directionIdx
+                found = true
+                // if there are other candidates, remember them in case we are traversing a thin edge and we have to go back
+                let _ = candidates.removeFirst()
+                backtrackStack.append(contentsOf: candidates)
+            }
+            if !found {
+                if sawFirst {
+                    // looped
+                    break
+                }
+                // try going back
+                if let c = backtrackStack.popLast() {
+                    current = c.coord
+                    prevDir = c.directionIdx
+                    found = true
+                }
+            }
+        }
+        return contour
+    }
+    private func buildBoundaryIndexMap(contour: [Coord2D]) -> [Int: Int] {
+        var map: [Int: Int] = [:]
+        for (i, c) in contour.enumerated() { map[inside.index(c)] = i }
+        return map
+    }
+
+    private func angle(from p: Coord2D, to q: Coord2D) -> Float {
+        let dx = Float(q.x - p.x)
+        let dy = Float(q.y - p.y)
+        return atan2f(dy, dx)
+    }
+
+    private func unwrap(_ theta: Float, around ref: Float) -> Float {
+        var t = theta
+        var r = ref
+        while t - r > Float.pi { t -= 2*Float.pi }
+        while t - r < -Float.pi { t += 2*Float.pi }
+        return t
+    }
+
+    /// Compute left/right boundary indices for each exterior pixel.
+    /// Returns two maps of size WxH with indices into the boundary contour (or -1 if none).
+    func exteriorLeftRightMaps(maxSteps: Int = 48) -> (left: SimpleImage<Int>, right: SimpleImage<Int>) {
+        let w = inside.width
+        let h = inside.height
+        var leftMap = SimpleImage<Int>(width: w, height: h, repeating: -1)
+        var rightMap = SimpleImage<Int>(width: w, height: h, repeating: -1)
+
+        let contour = extractBoundaryContour()
+        guard !contour.isEmpty else { return (leftMap, rightMap) }
+        let indexMap = buildBoundaryIndexMap(contour: contour)
+        let contourCount = contour.count
+
+        for y in 0..<h {
+            for x in 0..<w {
+                let p = (x,y)
+                if isInside(p) { continue } // only exterior
+                let parentIdx = closestParent.getValue(p)
+                if parentIdx < 0 { continue }
+                // Map parent pixel index to contour index; if not found, skip
+                guard let v0 = indexMap[parentIdx] else { continue }
+                let b = contour[v0]
+                let theta0 = angle(from: p, to: b)
+
+                // Walk forward (right) and backward (left) along contour
+                var bestLeftAngle = theta0
+                var bestLeftIdx = v0
+                var bestRightAngle = theta0
+                var bestRightIdx = v0
+
+                // Walk CW (increasing contour index) for right bound
+                var steps = 0
+                var i = v0
+                while steps < maxSteps {
+                    let j = (i + 1) % contourCount
+                    let a = contour[i]
+                    let c = contour[j]
+                    let ta = unwrap(angle(from: p, to: a), around: theta0)
+                    let tc = unwrap(angle(from: p, to: c), around: theta0)
+                    let tmax = max(ta, tc)
+                    if tmax > bestRightAngle { bestRightAngle = tmax; bestRightIdx = (ta > tc) ? i : j }
+                    i = j
+                    steps += 1
+                }
+
+                // Walk CCW (decreasing contour index) for left bound
+                steps = 0
+                i = v0
+                while steps < maxSteps {
+                    let j = (i - 1 + contourCount) % contourCount
+                    let a = contour[i]
+                    let c = contour[j]
+                    let ta = unwrap(angle(from: p, to: a), around: theta0)
+                    let tc = unwrap(angle(from: p, to: c), around: theta0)
+                    let tmin = min(ta, tc)
+                    if tmin < bestLeftAngle { bestLeftAngle = tmin; bestLeftIdx = (ta < tc) ? i : j }
+                    i = j
+                    steps += 1
+                }
+
+                leftMap.setValue(inside.index(contour[bestLeftIdx]), at: p)
+                rightMap.setValue(inside.index(contour[bestRightIdx]), at: p)
+            }
+        }
+        return (leftMap, rightMap)
     }
 }
 

@@ -22,7 +22,7 @@ struct Region_to_SDFTests {
             // Fallback on earlier versions
         }
     }
-
+    
     @Test func example() async throws {
         // Write your test here and use APIs like `#expect(...)` to check expected conditions.
         // Swift Testing Documentation
@@ -46,7 +46,7 @@ struct Region_to_SDFTests {
         }
         
         let sampler = ImageSampler(image: image)
-        let regionalSDF = RegionalSDF(sampler: sampler, regionColor: (r: 47, g: 143, b: 236, a: 255))
+        let regionalSDF = RegionalSDF(sampler: sampler, regionColor: ColorRGB(hexValue: 0x2f8fec))
         #expect(regionalSDF.isInside((15, 15)))
         #expect(!regionalSDF.isInside((0, 0)))
         try regionalSDF.computeSDF() { iteration in
@@ -75,6 +75,68 @@ struct Region_to_SDFTests {
             saveImage(cgImage, path: "regionalSDF_test_closest_uv.png")
         }
         #expect(closest.getValue((15, 15)) == 557)
+    }
+    
+    @Test(
+        "Correct region boundaries",
+        arguments: [
+            // the number of boundary pixels are different from the expected because
+            // thin edges may be ignored, or we may have to loop back, depeding on the starting point
+            (regionColor: ColorRGB(hexValue: 0xf7c164), expectedCount: 51), // actual boundary pixels = 52
+            (regionColor: ColorRGB(hexValue: 0x2f8fec), expectedCount: 53) // actual 57
+        ]
+    )
+    func boundaryCountour(regionColor: ColorRGB, expectedCount: Int) throws {
+        let testBundle = Bundle(for: SelfClass.self)
+        guard let url = testBundle.url(forResource: "RegionTest32x32", withExtension: "png") else {
+            Issue.record("Missing test image RegionTest32x32.png in test bundle")
+            return
+        }
+        guard let image = NSImage(contentsOf: url) else {
+            Issue.record("Failed to load NSImage from \(url)")
+            return
+        }
+        let sampler = ImageSampler(image: image)
+        let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor)
+        let contour = regionalSDF.extractBoundaryContour()
+        #expect(contour.count == expectedCount)
+        var img = SimpleImage<Int>(width: regionalSDF.width, height: regionalSDF.height, repeating: 0)
+        let palette = [ColorRGB.black] + ColorRGB.heatmap(low: .green, mid: .yellow, high: .red, maxValue: contour.count)
+        for i in 0..<contour.count {
+            img.setValue(i+1, at: contour[i])
+            if let cgImage = img.toCGImage(palette: palette) {
+                saveImage(cgImage, path: "boundaryContour_test_0x\(regionColor.hexString)_\(i).png")
+            }
+        }
+    }
+    
+    @Test(
+        "Exterior bounding maps",
+        arguments: [
+            (regionColor: ColorRGB(hexValue: 0xf7c164), expectedCount: 51),
+            (regionColor: ColorRGB(hexValue: 0x2f8fec), expectedCount: 53)
+        ]
+    )
+    func exteriorBoundingMaps(regionColor: ColorRGB, expectedCount: Int) throws {
+        let testBundle = Bundle(for: SelfClass.self)
+        guard let url = testBundle.url(forResource: "RegionTest32x32", withExtension: "png") else {
+            Issue.record("Missing test image RegionTest32x32.png in test bundle")
+            return
+        }
+        guard let image = NSImage(contentsOf: url) else {
+            Issue.record("Failed to load NSImage from \(url)")
+            return
+        }
+        let sampler = ImageSampler(image: image)
+        let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor)
+        try regionalSDF.computeSDF()
+        let maps = regionalSDF.exteriorLeftRightMaps()
+        if let cgImage = maps.left.indexToUVTexture() {
+            saveImage(cgImage, path: "exteriorBoundingMaps_test_left.png")
+        }
+        if let cgImage = maps.right.indexToUVTexture() {
+            saveImage(cgImage, path: "exteriorBoundingMaps_test_right.png")
+        }
     }
 
     // Helper to get the test bundle via class lookup

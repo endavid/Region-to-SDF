@@ -22,7 +22,7 @@ func IsClose(_ a: Float, _ b: Float, epsilon: Float = 0.0001) -> Bool {
     return ( fabsf( a - b ) < epsilon )
 }
 /// Compares 2 colors, ignoring alpha
-func IsClose(_ a: UintColorTuple, _ b: UintColorTuple, epsilon: Float = 0.001) -> Bool {
+func IsClose(_ a: ColorRGB, _ b: ColorRGB, epsilon: Float = 0.001) -> Bool {
     let r = Float(a.r) - Float(b.r)
     let g = Float(a.g) - Float(b.g)
     let b = Float(a.b) - Float(b.b)

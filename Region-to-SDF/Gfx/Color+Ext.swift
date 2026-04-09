@@ -31,6 +31,17 @@ extension Color {
         }
     }
     
+    var colorRGB: ColorRGB {
+        get {
+            let ns = NSColor(self)
+            guard let conv = ns.usingColorSpace(.sRGB) else { return .black }
+            let r = UInt8(round(conv.redComponent * 255))
+            let g = UInt8(round(conv.greenComponent * 255))
+            let b = UInt8(round(conv.blueComponent * 255))
+            return ColorRGB(r: r, g: g, b: b)
+        }
+    }
+    
     func hexDescription() -> String {
         #if canImport(AppKit)
         // Convert to sRGB NSColor to get components
