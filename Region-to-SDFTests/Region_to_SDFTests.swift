@@ -29,7 +29,14 @@ struct Region_to_SDFTests {
         // https://developer.apple.com/documentation/testing
     }
     
-    @Test func regionalSDF() throws {
+    @Test(
+        "Regional SDF",
+        arguments: [
+            (regionColor: ColorRGB(hexValue: 0xf7c164), testCoord: (28, 2), expectedSdf: -4.83, expectedEuclidean: -4.472, closestIndex: 218),
+            (regionColor: ColorRGB(hexValue: 0x2f8fec), testCoord: (15, 15), expectedSdf: -2.83, expectedEuclidean: -2.83, closestIndex: 557)
+        ]
+    )
+    func regionalSDF(regionColor: ColorRGB, testCoord: Coord2D, expectedSdf: Float, expectedEuclidean: Float, closestIndex: Int) throws {
         // Resolve the test bundle for this test type
         let testBundle = Bundle(for: SelfClass.self)
         // Alternatively: Bundle.module if using SwiftPM test target with resources
@@ -46,35 +53,35 @@ struct Region_to_SDFTests {
         }
         
         let sampler = ImageSampler(image: image)
-        let regionalSDF = RegionalSDF(sampler: sampler, regionColor: ColorRGB(hexValue: 0x2f8fec))
-        #expect(regionalSDF.isInside((15, 15)))
+        let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor)
+        #expect(regionalSDF.isInside(testCoord))
         #expect(!regionalSDF.isInside((0, 0)))
         try regionalSDF.computeSDF() { iteration in
-            if iteration > 10 && (iteration % 10 != 0) {
-                // skip 9 iterations
+            if iteration > 10 && (iteration % 25 != 0) {
+                // skip some
                 return
             }
             guard let cgImage = regionalSDF.toRGImage(maxContrast: true).toCGImage() else {
                 print("Failed to get image for iteration \(iteration)")
                 return
             }
-            saveImage(cgImage, path: "regionalSDF_test_\(iteration).png")
+            saveImage(cgImage, path: "regionalSDF_test_\(regionColor.hexString)_\(iteration).png")
         }
         let sdf = regionalSDF.getSDF()
         let euclideanSdf = regionalSDF.getEuclideanSDF()
         if let cgImage = RegionalSDF.distanceToRGImage(sdf, maxContrast: false).toCGImage() {
-            saveImage(cgImage, path: "regionalSDF_test_sdf.png")
+            saveImage(cgImage, path: "regionalSDF_test_\(regionColor.hexString)_sdf.png")
         }
         if let cgImage = RegionalSDF.distanceToRGImage(euclideanSdf, maxContrast: false).toCGImage() {
-            saveImage(cgImage, path: "regionalSDF_test_euclidean.png")
+            saveImage(cgImage, path: "regionalSDF_test_\(regionColor.hexString)_euclidean.png")
         }
-        #expect(IsClose(sdf.getValue((15,15)), -2.83, epsilon: 0.01))
-        #expect(IsClose(euclideanSdf.getValue((15,15)), -2.83, epsilon: 0.01))
+        #expect(IsClose(sdf.getValue(testCoord), expectedSdf, epsilon: 0.01))
+        #expect(IsClose(euclideanSdf.getValue(testCoord), expectedEuclidean, epsilon: 0.01))
         let closest = regionalSDF.getClosestBorder()
         if let cgImage = closest.indexToUVTexture() {
-            saveImage(cgImage, path: "regionalSDF_test_closest_uv.png")
+            saveImage(cgImage, path: "regionalSDF_test_\(regionColor.hexString)_closest_uv.png")
         }
-        #expect(closest.getValue((15, 15)) == 557)
+        #expect(closest.getValue(testCoord) == closestIndex)
     }
     
     @Test(
@@ -108,6 +115,15 @@ struct Region_to_SDFTests {
                 saveImage(cgImage, path: "boundaryContour_test_0x\(regionColor.hexString)_\(i).png")
             }
         }
+        let thickBoundary = regionalSDF.buildBoundaryIndexMap(contour: contour)
+        img.clear(value: 0)
+        for (iCoord, idx) in thickBoundary {
+            let coord = img.indexToCoord(iCoord)
+            img.setValue(idx+1, at: coord)
+        }
+        if let cgImage = img.toCGImage(palette: palette) {
+            saveImage(cgImage, path: "boundaryContour_test_0x\(regionColor.hexString)_thick.png")
+        }
     }
     
     @Test(
@@ -132,10 +148,10 @@ struct Region_to_SDFTests {
         try regionalSDF.computeSDF()
         let maps = regionalSDF.exteriorLeftRightMaps()
         if let cgImage = maps.left.indexToUVTexture() {
-            saveImage(cgImage, path: "exteriorBoundingMaps_test_left.png")
+            saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_left.png")
         }
         if let cgImage = maps.right.indexToUVTexture() {
-            saveImage(cgImage, path: "exteriorBoundingMaps_test_right.png")
+            saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_right.png")
         }
     }
 

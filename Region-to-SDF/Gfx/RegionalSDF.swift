@@ -82,17 +82,9 @@ class RegionalSDF {
         }
     }
     
-    /// Raster algorithm to compute SDF.
-    /// I go in raster order to find region borders, and then iterate until all the image is filled with distances.
-    func computeSDF(debugIterationFn: ((Int)->())? = nil) throws {
+    private func findBoundaryPixels() -> [Coord2D] {
         let w = distances.width
         let h = distances.height
-        let INF = RegionalSDF.BigValue
-        // Reset distances and parents
-        distances.clear(value: INF)
-        closestParent.clear(value: -1)
-
-        // 1) Collect boundary pixels (inside changes across 4-neighbors)
         var frontier: [Coord2D] = []
         frontier.reserveCapacity(w*h/8)
         for y in 0..<h {
@@ -114,6 +106,19 @@ class RegionalSDF {
                 }
             }
         }
+        return frontier
+    }
+    
+    /// Raster algorithm to compute SDF.
+    /// I go in raster order to find region borders, and then iterate until all the image is filled with distances.
+    func computeSDF(debugIterationFn: ((Int)->())? = nil) throws {
+        let INF = RegionalSDF.BigValue
+        // Reset distances and parents
+        distances.clear(value: INF)
+        closestParent.clear(value: -1)
+
+        // 1) Collect boundary pixels (inside changes across 4-neighbors)
+        let frontier: [Coord2D] = findBoundaryPixels()
         if frontier.isEmpty {
             throw RegionalSDFError.noRegionFound
         }
@@ -185,45 +190,7 @@ class RegionalSDF {
             if let fn = debugIterationFn { fn(popped) }
         }
     }
-        
-    private func getNeighbors(_ c: Coord2D, isOutside: Bool) -> [(p: Coord2D, cost: Float)] {
-        let neighbors: [(p: Coord2D, cost: Float)] = distances.get4Neighbors(c).compactMap { n in
-            if !distances.isValid(n) {
-                // we reached the image border
-                if isOutside {
-                    // if we are outside, the distance only grows
-                    return nil
-                }
-                // if we are inside, we reached a border
-                return (n, 1)
-            }
-            let v = distances.getValue(n)
-            if (isOutside && v < 0) || (!isOutside && v > 0) {
-                // a change of sign indicate we found a boundary, so stop
-                return (n, 1)
-            }
-            return (n, 1 + abs(v))
-        }
-        let diagonals: [(p: Coord2D, cost: Float)] = distances.get4Diagonals(c).compactMap { n in
-            if !distances.isValid(n) {
-                // we reached the image border
-                if isOutside {
-                    // if we are outside, the distance only grows
-                    return nil
-                }
-                // if we are inside, we reached a border. Diagonal distance is sqrt(2)
-                return (n, sqrt(2.0))
-            }
-            let v = distances.getValue(n)
-            if (isOutside && v < 0) || (!isOutside && v > 0) {
-                // a change of sign indicate we found a boundary, so stop
-                return (n, sqrt(2.0))
-            }
-            return (n, sqrt(2.0) + abs(v))
-        }
-        return neighbors + diagonals
-    }
-    
+
     func toGrayImage() -> SimpleImage<UInt8> {
         return RegionalSDF.distanceToGrayImage(getEuclideanSDF())
     }
@@ -355,9 +322,34 @@ class RegionalSDF {
         }
         return contour
     }
-    private func buildBoundaryIndexMap(contour: [Coord2D]) -> [Int: Int] {
+    func buildBoundaryIndexMap(contour: [Coord2D]) -> [Int: Int] {
+        // this boundary is thicker
+        let boundaryPixels = findBoundaryPixels()
+        var missingSet = Set(boundaryPixels.map { inside.index($0) }).subtracting(Set(contour.map { inside.index($0)}))
         var map: [Int: Int] = [:]
-        for (i, c) in contour.enumerated() { map[inside.index(c)] = i }
+        for i in 0..<contour.count {
+            let coord = contour[i]
+            map[inside.index(coord)] = i
+            // the boundary for SDF is thicker, so add neighbors
+            for n in inside.get8ValidNeighbors(coord) {
+                let indexN = inside.index(n)
+                if missingSet.contains(indexN) {
+                    map[indexN] = i
+                    missingSet.remove(indexN)
+                }
+            }
+        }
+        // there could still be thin edges we ignored...
+        for iCoord in missingSet {
+            let coord = inside.indexToCoord(iCoord)
+            for n in inside.get8ValidNeighbors(coord) {
+                let i = inside.index(n)
+                if let idx = map[i] {
+                    map[iCoord] = idx
+                    break
+                }
+            }
+        }
         return map
     }
 
