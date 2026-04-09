@@ -13,93 +13,151 @@ public enum RegionalSDFError: Error {
 
 class RegionalSDF {
     static let BigValue: Float = 1e10
-    var distances: SimpleImage<Float>
+    private var distances: SimpleImage<Float>
     private var visited: SimpleImage<UInt8>
+    private var inside: SimpleImage<UInt8>
+    private var closestParent: SimpleImage<Int>
     
     func get(coord: Coord2D) -> Float {
-        return distances.getValue(coord)
+        let sgn: Float = (inside.getValue(coord) == 1) ? -1.0 : 1.0
+        return sgn * distances.getValue(coord)
+    }
+    
+    func getSDF() -> SimpleImage<Float> {
+        let w = distances.width
+        let h = distances.height
+        var sdf = SimpleImage<Float>(width: w, height: h, repeating: RegionalSDF.BigValue)
+        for i in 0..<(w*h) {
+            let c = distances.indexToCoord(i)
+            sdf.data[i] = get(coord: c)
+        }
+        return sdf
     }
     
     init(sampler: ImageSampler, regionColor: UintColorTuple, epsilon: Float = 5.0 / 255.0) {
-        distances = SimpleImage<Float>(width: sampler.width, height: sampler.height, repeating: 0)
-        for y in 0..<sampler.height {
-            for x in 0..<sampler.width {
-                let sample: UintColorTuple = sampler.get(coord: (x, y))
-                // very big distances, but negative if inside the region
-                let v: Float = IsClose(sample, regionColor, epsilon: epsilon) ? -RegionalSDF.BigValue : RegionalSDF.BigValue
-                distances.setValue(v, at: (x,y))
+        let w = sampler.width
+        let h = sampler.height
+        distances = SimpleImage<Float>(width: w, height: h, repeating: RegionalSDF.BigValue)
+        visited = SimpleImage<UInt8>(width: w, height: h, repeating: 0)
+        inside = SimpleImage<UInt8>(width: w, height: h, repeating: 0)
+        closestParent = SimpleImage<Int>(width: w, height: h, repeating: -1)
+        // Build inside mask
+        for y in 0..<h {
+            for x in 0..<w {
+                let s: UintColorTuple = sampler.get(coord: (x, y))
+                let isIn = IsClose(s, regionColor, epsilon: epsilon) ? UInt8(1) : UInt8(0)
+                inside.setValue(isIn, at: (x,y))
             }
         }
-        visited = SimpleImage<UInt8>(width: sampler.width, height: sampler.height, repeating: 0)
     }
     
     /// Raster algorithm to compute SDF.
     /// I go in raster order to find region borders, and then iterate until all the image is filled with distances.
     func computeSDF(debugIterationFn: ((Int)->())? = nil) throws {
-        var missingData = 0
-        var iteration: Int = 0
-        var changed = distances.width * distances.height
-        if let fn = debugIterationFn {
-            fn(iteration)
-        }
-        while changed > 0 {
-            iteration += 1
-            missingData = 0
-            changed = 0
-            for y in 0..<distances.height {
-                for x in 0..<distances.width {
-                    let c = (x, y)
-                    let v = get(coord: c)
-                    let d = abs(v)
-                    var neighbors = getNeighbors(c, isOutside: v > 0)
-                    if neighbors.isEmpty {
-                        continue
-                    }
-                    neighbors.sort { $0.cost < $1.cost }
-                    let best = neighbors.first!.cost
-                    if best < d {
-                        distances.setValue(v > 0 ? best : -best, at: c)
-                        changed += 1
-                    } else if d == RegionalSDF.BigValue {
-                        missingData += 1
+        let w = distances.width
+        let h = distances.height
+        let INF = RegionalSDF.BigValue
+        // Reset distances and parents
+        distances.clear(value: INF)
+        closestParent.clear(value: -1)
+
+        // 1) Collect boundary pixels (inside changes across 4-neighbors)
+        var frontier: [Coord2D] = []
+        frontier.reserveCapacity(w*h/8)
+        for y in 0..<h {
+            for x in 0..<w {
+                let c = (x,y)
+                let inC = inside.getValue(c) == 1
+                var isBoundary = false
+                // NSEW check
+                for n in distances.get4Neighbors(c) {
+                    if distances.isValid(n) {
+                        let inN = inside.getValue(n) == 1
+                        if inN != inC { isBoundary = true; break }
                     }
                 }
-            }
-            if let fn = debugIterationFn {
-                fn(iteration)
+                if isBoundary {
+                    distances.setValue(0, at: c)
+                    closestParent.setValue(closestParent.index(c), at: c)
+                    frontier.append(c)
+                }
             }
         }
-        if missingData > 0 {
+        if frontier.isEmpty {
             throw RegionalSDFError.noRegionFound
+        }
+
+        // 2) Multi-source Dijkstra
+        struct Node { let d: Float; let x: Int; let y: Int }
+        // Simple binary heap
+        var heap: [Node] = []
+        func heapPush(_ node: Node) {
+            heap.append(node)
+            var i = heap.count - 1
+            while i > 0 {
+                let p = (i - 1) >> 1
+                if heap[p].d <= heap[i].d { break }
+                heap.swapAt(p, i)
+                i = p
+            }
+        }
+        func heapPop() -> Node? {
+            guard !heap.isEmpty else { return nil }
+            let res = heap[0]
+            let last = heap.removeLast()
+            if !heap.isEmpty {
+                heap[0] = last
+                var i = 0
+                while true {
+                    let l = i * 2 + 1
+                    let r = l + 1
+                    var m = i
+                    if l < heap.count && heap[l].d < heap[m].d { m = l }
+                    if r < heap.count && heap[r].d < heap[m].d { m = r }
+                    if m == i { break }
+                    heap.swapAt(i, m)
+                    i = m
+                }
+            }
+            return res
+        }
+
+        for c in frontier { heapPush(Node(d: 0, x: c.x, y: c.y)) }
+
+        let neighbors: [(dx:Int, dy:Int, cost: Float)] = [
+            (-1, 0, 1), (1, 0, 1), (0, -1, 1), (0, 1, 1),
+            (-1,-1, Float(sqrt(2.0))), (1,-1, Float(sqrt(2.0))), (-1,1, Float(sqrt(2.0))), (1,1, Float(sqrt(2.0)))
+        ]
+
+        var popped = 0
+        while let node = heapPop() {
+            popped += 1
+            let c = (node.x, node.y)
+            if node.d > distances.getValue(c) { continue } // stale
+            let parentIdx = closestParent.getValue(c)
+            for nb in neighbors {
+                let nx = node.x + nb.dx
+                let ny = node.y + nb.dy
+                let q = (nx, ny)
+                if !distances.isValid(q) { continue }
+                let nd = node.d + nb.cost
+                if nd < distances.getValue(q) {
+                    distances.setValue(nd, at: q)
+                    if parentIdx >= 0 {
+                        closestParent.setValue(parentIdx, at: q)
+                    } else {
+                        closestParent.setValue(closestParent.index(c), at: q)
+                    }
+                    heapPush(Node(d: nd, x: nx, y: ny))
+                }
+            }
+            if let fn = debugIterationFn { fn(popped) }
         }
     }
     
     /// After having found the closest distance, do gradient ascent/descent from every point to find the coordinate/index of the closest border
     func findClosestBorder() -> SimpleImage<Int> {
-        var closestBorder = SimpleImage<Int>(width: distances.width, height: distances.height, repeating: -1)
-        for y in 0..<distances.height {
-            for x in 0..<distances.width {
-                var c = (x, y)
-                var dist = get(coord: c)
-                let ascend = dist > 0 // outside the region
-                while ((ascend && dist > 0) || (!ascend && dist < 0)) { // == 0, or flipped sign => border
-                    var ns = distances.get8ValidNeighbors(c)
-                    if ns.isEmpty {
-                        break
-                    }
-                    if ascend {
-                        ns.sort() { get(coord: $0) < get(coord: $1) }
-                    } else {
-                        ns.sort() { get(coord: $1) < get(coord: $0) }
-                    }
-                    c = ns.first!
-                    dist = get(coord: c)
-                }
-                // found border
-                closestBorder.setValue(closestBorder.index(c), at: c)
-            }
-        }
-        return closestBorder
+        return closestParent
     }
     
     private func getNeighbors(_ c: Coord2D, isOutside: Bool) -> [(p: Coord2D, cost: Float)] {
@@ -141,12 +199,13 @@ class RegionalSDF {
     }
     
     func toGrayImage() -> SimpleImage<UInt8> {
-        let w = distances.width
-        let h = distances.height
+        let sdf = getSDF()
+        let w = sdf.width
+        let h = sdf.height
         var img = SimpleImage<UInt8>(width: w, height: h, repeating: 0)
         // hypotenuse
         let maxDistance = sqrtf(Float(w * w + h * h))
-        img.data = distances.data.map { value in
+        img.data = sdf.data.map { value in
             // -1..1
             let normalized = value / maxDistance
             // 0..1
@@ -157,24 +216,25 @@ class RegionalSDF {
     }
     
     func toRGImage(maxContrast: Bool = false) -> SimpleImage<UInt32> {
-        let w = distances.width
-        let h = distances.height
+        let sdf = getSDF()
+        let w = sdf.width
+        let h = sdf.height
         var img = SimpleImage<UInt32>(width: w, height: h, repeating: 0)
         // hypotenuse
         let maxDistance = sqrtf(Float(w * w + h * h))
         var maxRed = maxDistance
         var minGreen = -maxDistance
         if maxContrast {
-            maxRed = distances.data.reduce(0) { max, value in
+            maxRed = sdf.data.reduce(0) { max, value in
                 let d = min(value, maxDistance)
                 return max > d ? max : d
             }
-            minGreen = distances.data.reduce(0) { minV, value in
+            minGreen = sdf.data.reduce(0) { minV, value in
                 let d = max(value, -maxDistance)
                 return minV < d ? minV : d
             }
         }
-        img.data = distances.data.map { value in
+        img.data = sdf.data.map { value in
             // -1..1
             let positive = Clamp(value / maxRed, low: 0, high: 1)
             let negative = Clamp(value / minGreen, low: 0, high: 1)

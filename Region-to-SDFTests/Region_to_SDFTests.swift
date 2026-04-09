@@ -58,12 +58,12 @@ struct Region_to_SDFTests {
             }
             saveImage(cgImage, path: "regionalSDF_test_\(iteration).png")
         }
-        #expect(IsClose(regionalSDF.get(coord: (15, 15)), -3.83, epsilon: 0.01))
+        #expect(IsClose(regionalSDF.get(coord: (15, 15)), -2.83, epsilon: 0.01))
         let closest = regionalSDF.findClosestBorder()
         if let cgImage = closest.indexToUVTexture() {
             saveImage(cgImage, path: "regionalSDF_test_closest_uv.png")
         }
-        #expect(closest.getValue((15, 15)) == 0)
+        #expect(closest.getValue((15, 15)) == 557)
     }
 
     // Helper to get the test bundle via class lookup
