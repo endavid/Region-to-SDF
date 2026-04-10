@@ -35,6 +35,16 @@ struct SimpleImage<T> {
     mutating func clear(value: T) {
         data = [T].init(repeating: value, count: width * height)
     }
+    mutating func setAll(_ fn: (Int, Coord2D)->T) {
+        for i in 0..<data.count {
+            data[i] = fn(i, indexToCoord(i))
+        }
+    }
+    mutating func setAll(_ fn: (Int)->T) {
+        for i in 0..<data.count {
+            data[i] = fn(i)
+        }
+    }
     
     func get4Neighbors(_ p: Coord2D) -> [Coord2D] {
         return [

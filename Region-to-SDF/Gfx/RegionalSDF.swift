@@ -189,6 +189,18 @@ class RegionalSDF {
             }
             if let fn = debugIterationFn { fn(popped) }
         }
+        
+        // the boundary is thicker than the actual region, so correct the closest parent
+        for i in 0..<closestParent.data.count {
+            if inside.data[i] == 0 && closestParent.data[i] == i {
+                // point outside that points to itself instead of a boundary (interior) point
+                let ns = inside.get4Neighbors(inside.indexToCoord(i)).filter { inside.isValid($0) && inside.getValue($0) == 1 }
+                if let neighbor = ns.first {
+                    // we pick the first but it could be any neighbor
+                    closestParent.data[i] = inside.index(neighbor)
+                }
+            }
+        }
     }
 
     func toGrayImage() -> SimpleImage<UInt8> {
@@ -359,9 +371,8 @@ class RegionalSDF {
         return atan2f(dy, dx)
     }
 
-    private func unwrap(_ theta: Float, around ref: Float) -> Float {
+    private func unwrap(_ theta: Float, around r: Float) -> Float {
         var t = theta
-        var r = ref
         while t - r > Float.pi { t -= 2*Float.pi }
         while t - r < -Float.pi { t += 2*Float.pi }
         return t
@@ -386,6 +397,8 @@ class RegionalSDF {
                 if isInside(p) { continue } // only exterior
                 let parentIdx = closestParent.getValue(p)
                 if parentIdx < 0 { continue }
+                // because the border is thicker, some points aren't really "inside" but are treated as such
+                if parentIdx == inside.index(p) { continue }
                 // Map parent pixel index to contour index; if not found, skip
                 guard let v0 = indexMap[parentIdx] else { continue }
                 let b = contour[v0]

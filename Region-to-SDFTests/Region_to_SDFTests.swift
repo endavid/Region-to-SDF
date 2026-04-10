@@ -82,6 +82,21 @@ struct Region_to_SDFTests {
             saveImage(cgImage, path: "regionalSDF_test_\(regionColor.hexString)_closest_uv.png")
         }
         #expect(closest.getValue(testCoord) == closestIndex)
+        // check which points refer to themselves (should be interior points only)
+        var img = SimpleImage<Int>(width: closest.width, height: closest.height, repeating: 0)
+        let boundary = Set<Int>(regionalSDF.extractBoundaryContour().map { closest.index($0) })
+        img.setAll() { i, coord in
+            if closest.data[i] != i {
+                return 0
+            }
+            if boundary.contains(i) {
+                return 1
+            }
+            return regionalSDF.isInside(coord) ? 2 : 3
+        }
+        if let cgImage = img.toCGImage(palette: [.black, .white, .yellow, .enDavid_orange]) {
+            saveImage(cgImage, path: "regionalSDF_test_\(regionColor.hexString)_closest_identity_check.png")
+        }
     }
     
     @Test(
@@ -146,12 +161,35 @@ struct Region_to_SDFTests {
         let sampler = ImageSampler(image: image)
         let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor)
         try regionalSDF.computeSDF()
+        let closest = regionalSDF.getClosestBorder()
         let maps = regionalSDF.exteriorLeftRightMaps()
         if let cgImage = maps.left.indexToUVTexture() {
             saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_left.png")
         }
         if let cgImage = maps.right.indexToUVTexture() {
             saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_right.png")
+        }
+        let debugPalette: Palette = [.black, .enDavid_brown2, .white, .yellow, .green, .red]
+        let testCoords: [Coord2D] = [(5, 10), (10, 12), (10, 30), (17, 25), (30, 2), (30, 30)]
+        for c in testCoords {
+            var img = SimpleImage<Int>(width: regionalSDF.width, height: regionalSDF.height, repeating: 0)
+            img.setAll() { regionalSDF.isInside($1) ? 1 : 0 }
+            img.setValue(2, at: c)
+            // these contain the index to the target coordinate
+            let close = closest.getValue(c)
+            let left = maps.left.getValue(c)
+            let right = maps.right.getValue(c)
+            img.data[close] = 3
+            // negative for points inside the region
+            if left >= 0 {
+                img.data[left] = 4
+            }
+            if right >= 0 {
+                img.data[right] = 5
+            }
+            if let cgImage = img.toCGImage(palette: debugPalette) {
+                saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_\(c.x)_\(c.y).png")
+            }
         }
     }
 
