@@ -29,6 +29,12 @@ struct Region_to_SDFTests {
         // https://developer.apple.com/documentation/testing
     }
     
+    @Test func someMaths() {
+        let p = CGPoint(x: 10, y: 0.2)
+        let n = Normalize(p)
+        #expect(IsClose(atan2(p.y, p.x), atan2(n.y, n.x), epsilon: 1e-6))
+    }
+    
     @Test(
         "Regional SDF",
         arguments: [
@@ -190,6 +196,11 @@ struct Region_to_SDFTests {
             if let cgImage = img.toCGImage(palette: debugPalette) {
                 saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_\(c.x)_\(c.y).png")
             }
+        }
+        let adf = regionalSDF.computeAngularDistanceField(left: maps.left, right: maps.right)
+        let adfImage = RegionalSDF.adfToRGBAImage(adf)
+        if let cgImage = adfImage.toCGImage() {
+            saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_adf.png")
         }
     }
 

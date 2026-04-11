@@ -21,6 +21,9 @@ func DegToRad(_ angle: Float) -> Float {
 func IsClose(_ a: Float, _ b: Float, epsilon: Float = 0.0001) -> Bool {
     return ( fabsf( a - b ) < epsilon )
 }
+func IsClose(_ a: Double, _ b: Double, epsilon: Double = 0.0001) -> Bool {
+    return ( abs( a - b ) < epsilon )
+}
 /// Compares 2 colors, ignoring alpha
 func IsClose(_ a: ColorRGB, _ b: ColorRGB, epsilon: Float = 0.001) -> Bool {
     let r = Float(a.r) - Float(b.r)
@@ -69,6 +72,19 @@ func -(_ a: Coord2D, _ b: Coord2D) -> Coord2D {
 
 func Length(_ v: Coord2D) -> Float {
     return sqrtf(Float(v.x * v.x + v.y * v.y))
+}
+
+func LengthD(_ v: CGPoint) -> Double {
+    return sqrt(v.x * v.x + v.y * v.y)
+}
+
+func Normalize(_ v: CGPoint) -> CGPoint {
+    let n = max(1e-10, LengthD(v))
+    return CGPoint(x: v.x / n, y: v.y / n)
+}
+
+func Dot(_ a: CGPoint, _ b: CGPoint) -> Double {
+    return a.x * b.x + a.y * b.y
 }
 
 // Factorial of a number with a cache

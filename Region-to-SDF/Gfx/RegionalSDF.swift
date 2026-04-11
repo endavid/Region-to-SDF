@@ -211,57 +211,6 @@ class RegionalSDF {
         return RegionalSDF.distanceToRGImage(getEuclideanSDF(), maxContrast: maxContrast)
     }
 
-    static func distanceToGrayImage(_ sdf: SimpleImage<Float>) -> SimpleImage<UInt8> {
-        let w = sdf.width
-        let h = sdf.height
-        var img = SimpleImage<UInt8>(width: w, height: h, repeating: 0)
-        // hypotenuse
-        let maxDistance = sqrtf(Float(w * w + h * h))
-        img.data = sdf.data.map { value in
-            // -1..1
-            let normalized = value / maxDistance
-            // 0..1
-            let u = Clamp(normalized * 0.5 + 0.5, low: 0, high: 1)
-            return UInt8(roundf(255.0 * u))
-        }
-        return img
-    }
-    
-    static func distanceToRGImage(_ sdf: SimpleImage<Float>, maxContrast: Bool = false) -> SimpleImage<UInt32> {
-        let w = sdf.width
-        let h = sdf.height
-        var img = SimpleImage<UInt32>(width: w, height: h, repeating: 0)
-        // hypotenuse
-        let maxDistance = sqrtf(Float(w * w + h * h))
-        var maxRed = maxDistance
-        var minGreen = -maxDistance
-        if maxContrast {
-            maxRed = sdf.data.reduce(0) { max, value in
-                let d = min(value, maxDistance)
-                return max > d ? max : d
-            }
-            minGreen = sdf.data.reduce(0) { minV, value in
-                let d = max(value, -maxDistance)
-                return minV < d ? minV : d
-            }
-        }
-        if IsClose(maxRed, 0) {
-            maxRed = 0.001
-        }
-        if IsClose(minGreen, 0) {
-            minGreen = 0.001
-        }
-        img.data = sdf.data.map { value in
-            // -1..1
-            let positive = Clamp(value / maxRed, low: 0, high: 1)
-            let negative = Clamp(value / minGreen, low: 0, high: 1)
-            let r = UInt32(roundf(255.0 * positive))
-            let g = UInt32(roundf(255.0 * negative))
-            return UInt32(r << 24 | g << 16 | 0x00ff)
-        }
-        return img
-    }
-
     // MARK: - Boundary contour extraction (8-connected)
     func extractBoundaryContour() -> [Coord2D] {
         let w = inside.width
@@ -445,6 +394,115 @@ class RegionalSDF {
             }
         }
         return (leftMap, rightMap)
+    }
+    
+    /// AngularDistanceField (ADF) is a name I came up with. We store 4 floats to approximate the distance a ray has to travel to hit a border
+    typealias ADF = (angle: Float, dClose: Float, dFar: Float, cosine: Float)
+    
+    func computeAngularDistanceField(left: SimpleImage<Int>, right: SimpleImage<Int>) -> SimpleImage<ADF> {
+        let euclidean = getEuclideanSDF()
+        var img = SimpleImage<ADF>(width: width, height: height, repeating: (0,0,0,0))
+        img.setAll() { i, coord in
+            let dClose = abs(euclidean.data[i])
+            if inside.data[i] == 1 {
+                return (0, dClose, dClose, -1)
+            }
+            // we have 2 point that define a wedge
+            let va = inside.indexToCoord(left.data[i]) - coord
+            let vb = inside.indexToCoord(right.data[i]) - coord
+            let vc = inside.indexToCoord(closestParent.data[i]) - coord
+            let na = Normalize(CGPoint(x: Double(va.x), y: Double(va.y)))
+            let nb = Normalize(CGPoint(x: Double(vb.x), y: Double(vb.y)))
+            let nc = Normalize(CGPoint(x: Double(vc.x), y: Double(vc.y)))
+            var nMid: CGPoint = CGPoint(x: (na.x + nb.x) / 2.0, y: (na.y + nb.y) / 2.0)
+            if Dot(nc, nMid) < 0 {
+                // This could happen if we are inside a concave area, and left and right are behind the point
+                // Then, flip nMid to point to the same direction as nc, our closest direction.
+                nMid.x = -nMid.x
+                nMid.y = -nMid.y
+            }
+            let angle = atan2l(nMid.y, nMid.x)
+            let da = Length(va)
+            let db = Length(vb)
+            let dFar = (da + db) / 2.0
+            let cosine = Dot(na, nMid)
+            return (Float(angle), dClose, dFar, Float(cosine))
+        }
+        return img
+    }
+    
+    
+    // MARK: Image conversion
+    
+    static func distanceToGrayImage(_ sdf: SimpleImage<Float>) -> SimpleImage<UInt8> {
+        let w = sdf.width
+        let h = sdf.height
+        var img = SimpleImage<UInt8>(width: w, height: h, repeating: 0)
+        // hypotenuse
+        let maxDistance = sqrtf(Float(w * w + h * h))
+        img.data = sdf.data.map { value in
+            // -1..1
+            let normalized = value / maxDistance
+            // 0..1
+            let u = Clamp(normalized * 0.5 + 0.5, low: 0, high: 1)
+            return UInt8(roundf(255.0 * u))
+        }
+        return img
+    }
+    
+    static func distanceToRGImage(_ sdf: SimpleImage<Float>, maxContrast: Bool = false) -> SimpleImage<UInt32> {
+        let w = sdf.width
+        let h = sdf.height
+        var img = SimpleImage<UInt32>(width: w, height: h, repeating: 0)
+        // hypotenuse
+        let maxDistance = sqrtf(Float(w * w + h * h))
+        var maxRed = maxDistance
+        var minGreen = -maxDistance
+        if maxContrast {
+            maxRed = sdf.data.reduce(0) { max, value in
+                let d = min(value, maxDistance)
+                return max > d ? max : d
+            }
+            minGreen = sdf.data.reduce(0) { minV, value in
+                let d = max(value, -maxDistance)
+                return minV < d ? minV : d
+            }
+        }
+        if IsClose(maxRed, 0) {
+            maxRed = 0.001
+        }
+        if IsClose(minGreen, 0) {
+            minGreen = 0.001
+        }
+        img.data = sdf.data.map { value in
+            // -1..1
+            let positive = Clamp(value / maxRed, low: 0, high: 1)
+            let negative = Clamp(value / minGreen, low: 0, high: 1)
+            let r = UInt32(roundf(255.0 * positive))
+            let g = UInt32(roundf(255.0 * negative))
+            return UInt32(r << 24 | g << 16 | 0x00ff)
+        }
+        return img
+    }
+    
+    static func adfToRGBAImage(_ adf: SimpleImage<ADF>) -> SimpleImage<UInt32> {
+        let w = adf.width
+        let h = adf.height
+        var img = SimpleImage<UInt32>(width: w, height: h, repeating: 0)
+        // hypotenuse
+        let maxDistance = sqrtf(Float(w * w + h * h))
+        img.data = adf.data.map { v in
+            let angle = 0.5 * v.angle / PI + 0.5
+            let dClose = v.dClose / maxDistance
+            let dFar = v.dFar / maxDistance
+            let cosine = 0.5 * v.cosine + 0.5
+            let r = UInt32(roundf(255.0 * angle)) & 0xff
+            let g = UInt32(roundf(255.0 * dClose)) & 0xff
+            let b = UInt32(roundf(255.0 * dFar)) & 0xff
+            let a = UInt32(roundf(255.0 * cosine)) & 0xff
+            return UInt32(r << 24 | g << 16 | b << 8 | a)
+        }
+        return img
     }
 }
 
