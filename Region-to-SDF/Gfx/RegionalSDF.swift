@@ -347,7 +347,11 @@ class RegionalSDF {
                 let parentIdx = closestParent.getValue(p)
                 if parentIdx < 0 { continue }
                 // because the border is thicker, some points aren't really "inside" but are treated as such
-                if parentIdx == inside.index(p) { continue }
+                if parentIdx == inside.index(p) {
+                    leftMap.setValue(parentIdx, at: p)
+                    rightMap.setValue(parentIdx, at: p)
+                    continue
+                }
                 // Map parent pixel index to contour index; if not found, skip
                 guard let v0 = indexMap[parentIdx] else { continue }
                 let b = contour[v0]
@@ -404,7 +408,8 @@ class RegionalSDF {
         var img = SimpleImage<ADF>(width: width, height: height, repeating: (0,0,0,0))
         img.setAll() { i, coord in
             let dClose = abs(euclidean.data[i])
-            if inside.data[i] == 1 {
+            if inside.data[i] == 1 || (left.data[i] == i && right.data[i] == i) {
+                // inside, or border points pointing at themselves
                 return (0, dClose, dClose, -1)
             }
             // we have 2 point that define a wedge
