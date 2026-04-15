@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import CoreGraphics
 
 public enum RegionalSDFError: Error {
     case noRegionFound
@@ -327,29 +328,32 @@ class RegionalSDF {
         return t
     }
 
-    /// Compute left/right boundary indices for each exterior pixel.
-    /// Returns two maps of size WxH with indices into the boundary contour (or -1 if none).
-    func exteriorLeftRightMaps(maxSteps: Int = 48) -> (left: SimpleImage<Int>, right: SimpleImage<Int>) {
+    typealias FoV = (left: Int, right: Int, mid: Int)
+    
+    /// Compute left/right boundary indices for each exterior pixel, and mid, where mid is the average direction.
+    /// Returns a maps of size WxH with indices into the boundary contour (or -1 if none) defining the FoV from every point to the region
+    func computeFoV(maxSteps: Int = 48, debugCoords: [Coord2D] = [], debugPrefix: URL? = nil) -> SimpleImage<FoV> {
         let w = inside.width
         let h = inside.height
-        var leftMap = SimpleImage<Int>(width: w, height: h, repeating: -1)
-        var rightMap = SimpleImage<Int>(width: w, height: h, repeating: -1)
+        var fovMap = SimpleImage<FoV>(width: w, height: h, repeating: (-1, -1, -1))
 
         let contour = extractBoundaryContour()
-        guard !contour.isEmpty else { return (leftMap, rightMap) }
+        guard !contour.isEmpty else { return fovMap }
         let indexMap = buildBoundaryIndexMap(contour: contour)
         let contourCount = contour.count
+        
+        let debugSet = Set(debugCoords.map { inside.index($0) })
 
         for y in 0..<h {
             for x in 0..<w {
-                let p = (x,y)
+                let p: Coord2D = (x,y)
+                let indexP = inside.index(p)
                 if isInside(p) { continue } // only exterior
                 let parentIdx = closestParent.getValue(p)
                 if parentIdx < 0 { continue }
                 // because the border is thicker, some points aren't really "inside" but are treated as such
-                if parentIdx == inside.index(p) {
-                    leftMap.setValue(parentIdx, at: p)
-                    rightMap.setValue(parentIdx, at: p)
+                if parentIdx == indexP {
+                    fovMap.setValue((parentIdx, parentIdx, parentIdx), at: p)
                     continue
                 }
                 // Map parent pixel index to contour index; if not found, skip
@@ -392,45 +396,82 @@ class RegionalSDF {
                     i = j
                     steps += 1
                 }
-
-                leftMap.setValue(inside.index(contour[bestLeftIdx]), at: p)
-                rightMap.setValue(inside.index(contour[bestRightIdx]), at: p)
+                
+                let lIndex = inside.index(contour[bestLeftIdx])
+                let rIndex = inside.index(contour[bestRightIdx])
+                
+                // mid vector of the wedge defined by left and right
+                let va = contour[bestLeftIdx] - p
+                let vb = contour[bestRightIdx] - p
+                let vc = b - p
+                let na = Normalize(CGPoint(x: Double(va.x), y: Double(va.y)))
+                let nb = Normalize(CGPoint(x: Double(vb.x), y: Double(vb.y)))
+                let nc = Normalize(CGPoint(x: Double(vc.x), y: Double(vc.y)))
+                var nMid: CGPoint = CGPoint(x: (na.x + nb.x) / 2.0, y: (na.y + nb.y) / 2.0)
+                if Dot(nc, nMid) < 0 {
+                    // This could happen if we are inside a concave area, and left and right are behind the point
+                    // Then, flip nMid to point to the same direction as nc, our closest direction.
+                    nMid.x = -nMid.x
+                    nMid.y = -nMid.y
+                }
+                // check all points in the boundary of the fan and select the one closest to the mid direction
+                var boundaryPiece: [Coord2D] = []
+                var index = bestRightIdx
+                while index != bestLeftIdx { // CW
+                    boundaryPiece.append(contour[index])
+                    index = (index + 1) % contourCount
+                }
+                var midPoint = contour[bestRightIdx]
+                var bestCos = Dot(na, nMid)
+                for i in 0..<boundaryPiece.count {
+                    let pb = boundaryPiece[i]
+                    let v = pb - p
+                    let n = Normalize(CGPoint(x: Double(v.x), y: Double(v.y)))
+                    let cosv = Dot(n, nMid)
+                    if cosv > bestCos {
+                        bestCos = cosv
+                        midPoint = pb
+                        if let path = debugPrefix, debugSet.contains(indexP) {
+                            let mIndex = inside.index(midPoint)
+                            fovMap.setValue((lIndex, rIndex, mIndex), at: p)
+                            if let cgImage = createFoVDebugImage(coord: p, fovMap: fovMap, boundary: boundaryPiece) {
+                                let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_\(i).png")
+                                CGImageWriteToFile(cgImage, filename: outputURL)
+                                logDebug("🕸️ computeFoV: debug file saved to \(outputURL)")
+                            }
+                        }
+                    }
+                }
+                let mIndex = inside.index(midPoint)
+                fovMap.setValue((lIndex, rIndex, mIndex), at: p)
             }
         }
-        return (leftMap, rightMap)
+        return fovMap
     }
     
     /// AngularDistanceField (ADF) is a name I came up with. We store 4 floats to approximate the distance a ray has to travel to hit a border
     typealias ADF = (angle: Float, dClose: Float, dFar: Float, cosine: Float)
     
-    func computeAngularDistanceField(left: SimpleImage<Int>, right: SimpleImage<Int>) -> SimpleImage<ADF> {
+    func computeAngularDistanceField(fovMap: SimpleImage<FoV>) -> SimpleImage<ADF> {
         let euclidean = getEuclideanSDF()
         var img = SimpleImage<ADF>(width: width, height: height, repeating: (0,0,0,0))
         img.setAll() { i, coord in
             let dClose = abs(euclidean.data[i])
-            if inside.data[i] == 1 || (left.data[i] == i && right.data[i] == i) {
+            if inside.data[i] == 1 || (fovMap.data[i].left == i && fovMap.data[i].right == i) {
                 // inside, or border points pointing at themselves
                 return (0, dClose, dClose, -1)
             }
             // we have 2 point that define a wedge
-            let va = inside.indexToCoord(left.data[i]) - coord
-            let vb = inside.indexToCoord(right.data[i]) - coord
-            let vc = inside.indexToCoord(closestParent.data[i]) - coord
-            let na = Normalize(CGPoint(x: Double(va.x), y: Double(va.y)))
-            let nb = Normalize(CGPoint(x: Double(vb.x), y: Double(vb.y)))
-            let nc = Normalize(CGPoint(x: Double(vc.x), y: Double(vc.y)))
-            var nMid: CGPoint = CGPoint(x: (na.x + nb.x) / 2.0, y: (na.y + nb.y) / 2.0)
-            if Dot(nc, nMid) < 0 {
-                // This could happen if we are inside a concave area, and left and right are behind the point
-                // Then, flip nMid to point to the same direction as nc, our closest direction.
-                nMid.x = -nMid.x
-                nMid.y = -nMid.y
-            }
-            let angle = atan2l(nMid.y, nMid.x)
-            let da = Length(va)
-            let db = Length(vb)
-            let dFar = (da + db) / 2.0
-            let cosine = Dot(na, nMid)
+            let vl = inside.indexToCoord(fovMap.data[i].left) - coord
+            let vr = inside.indexToCoord(fovMap.data[i].right) - coord
+            let vm = inside.indexToCoord(fovMap.data[i].mid) - coord
+            let angle = atan2f(Float(vm.y), Float(vm.x))
+            let dl = Length(vl)
+            let dr = Length(vr)
+            let dFar = (dl + dr) / 2.0
+            let nl = Normalize(CGPoint(x: Double(vl.x), y: Double(vl.y)))
+            let nm = Normalize(CGPoint(x: Double(vm.x), y: Double(vm.y)))
+            let cosine = Dot(nl, nm)
             return (Float(angle), dClose, dFar, Float(cosine))
         }
         return img
@@ -509,5 +550,55 @@ class RegionalSDF {
         }
         return img
     }
+    
+    func createFoVDebugImage(coord: Coord2D, fovMap: SimpleImage<FoV>, boundary: [Coord2D] = []) -> CGImage? {
+        let debugPalette: Palette = [.black, .enDavid_brown2, .white, .yellow, .green, .red, .enDavid_brown3, .enDavid_orange]
+        var img = SimpleImage<Int>(width: width, height: height, repeating: 0)
+        img.setAll() { isInside($1) ? 1 : 0 }
+        img.setValue(2, at: coord)
+        for p in boundary {
+            img.setValue(6, at: p)
+        }
+        // these contain the index to the target coordinate
+        let close = closestParent.getValue(coord)
+        let points = fovMap.getValue(coord)
+        img.data[close] = 3
+        // negative for points inside the region
+        if points.left >= 0 {
+            img.data[points.left] = 4
+        }
+        if points.right >= 0 {
+            img.data[points.right] = 5
+        }
+        if points.mid >= 0 {
+            img.data[points.mid] = 7
+        }
+        return img.toCGImage(palette: debugPalette)
+    }
+
 }
 
+extension SimpleImage where T == RegionalSDF.FoV {
+
+    var left: SimpleImage<Int> {
+        get {
+            var img = SimpleImage<Int>(width: width, height: height, repeating: -1)
+            img.setAll { self.data[$0].left }
+            return img
+        }
+    }
+    var right: SimpleImage<Int> {
+        get {
+            var img = SimpleImage<Int>(width: width, height: height, repeating: -1)
+            img.setAll { self.data[$0].right }
+            return img
+        }
+    }
+    var mid: SimpleImage<Int> {
+        get {
+            var img = SimpleImage<Int>(width: width, height: height, repeating: -1)
+            img.setAll { self.data[$0].mid }
+            return img
+        }
+    }
+}

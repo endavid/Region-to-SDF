@@ -14,7 +14,7 @@ import AppKit
 struct Region_to_SDFTests {
     
     func saveImage(_ cgImage: CGImage, path: String) {
-        let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent(path)
+        let outputURL = FileManager.default.temporaryDirectory.appending(path: path, directoryHint: .notDirectory)
         if #available(macOS 13.0, iOS 14.0, *) {
             CGImageWriteToFile(cgImage, filename: outputURL)
             print("✅ Saved iteration image to \(outputURL.path)")
@@ -167,37 +167,23 @@ struct Region_to_SDFTests {
         let sampler = ImageSampler(image: image)
         let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor)
         try regionalSDF.computeSDF()
-        let closest = regionalSDF.getClosestBorder()
-        let maps = regionalSDF.exteriorLeftRightMaps()
-        if let cgImage = maps.left.indexToUVTexture() {
+        let testCoords: [Coord2D] = [(5, 10), (10, 12), (10, 30), (17, 25), (20, 14), (20, 18), (22, 17), (30, 2), (30, 30)]
+        let fovMap = regionalSDF.computeFoV(maxSteps: 48, debugCoords: testCoords, debugPrefix: FileManager.default.temporaryDirectory.appending(path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)"))
+        if let cgImage = fovMap.left.indexToUVTexture() {
             saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_left.png")
         }
-        if let cgImage = maps.right.indexToUVTexture() {
+        if let cgImage = fovMap.right.indexToUVTexture() {
             saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_right.png")
         }
-        let debugPalette: Palette = [.black, .enDavid_brown2, .white, .yellow, .green, .red]
-        let testCoords: [Coord2D] = [(5, 10), (10, 12), (10, 30), (17, 25), (30, 2), (30, 30)]
+        if let cgImage = fovMap.mid.indexToUVTexture() {
+            saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_mid.png")
+        }
         for c in testCoords {
-            var img = SimpleImage<Int>(width: regionalSDF.width, height: regionalSDF.height, repeating: 0)
-            img.setAll() { regionalSDF.isInside($1) ? 1 : 0 }
-            img.setValue(2, at: c)
-            // these contain the index to the target coordinate
-            let close = closest.getValue(c)
-            let left = maps.left.getValue(c)
-            let right = maps.right.getValue(c)
-            img.data[close] = 3
-            // negative for points inside the region
-            if left >= 0 {
-                img.data[left] = 4
-            }
-            if right >= 0 {
-                img.data[right] = 5
-            }
-            if let cgImage = img.toCGImage(palette: debugPalette) {
+            if let cgImage = regionalSDF.createFoVDebugImage(coord: c, fovMap: fovMap) {
                 saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_\(c.x)_\(c.y).png")
             }
         }
-        let adf = regionalSDF.computeAngularDistanceField(left: maps.left, right: maps.right)
+        let adf = regionalSDF.computeAngularDistanceField(fovMap: fovMap)
         let adfImage = RegionalSDF.adfToRGBAImage(adf)
         if let cgImage = adfImage.toCGImage() {
             saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_adf.png")
