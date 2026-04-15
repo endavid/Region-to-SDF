@@ -328,11 +328,26 @@ class RegionalSDF {
         return t
     }
 
+    private func angleBisector(_ va: Coord2D, _ vb: Coord2D, epsilon: Double = 0.0001) -> CGPoint {
+        let na = Normalize(CGPoint(x: Double(va.x), y: Double(va.y)))
+        let nb = Normalize(CGPoint(x: Double(vb.x), y: Double(vb.y)))
+        let ab = na + nb
+        let m = LengthD(ab)
+        if m < epsilon {
+            // perpendicular vector in arbitrary orientation
+            if na.x < epsilon {
+                return CGPoint(x: na.x, y: -na.y)
+            }
+            return CGPoint(x: -na.x, y: na.y)
+        }
+        return Normalize(ab)
+    }
+    
     typealias FoV = (left: Int, right: Int, mid: Int)
     
     /// Compute left/right boundary indices for each exterior pixel, and mid, where mid is the average direction.
     /// Returns a maps of size WxH with indices into the boundary contour (or -1 if none) defining the FoV from every point to the region
-    func computeFoV(maxSteps: Int = 48, debugCoords: [Coord2D] = [], debugPrefix: URL? = nil) -> SimpleImage<FoV> {
+    func computeFoV(debugCoords: [Coord2D] = [], debugPrefix: URL? = nil) -> SimpleImage<FoV> {
         let w = inside.width
         let h = inside.height
         var fovMap = SimpleImage<FoV>(width: w, height: h, repeating: (-1, -1, -1))
@@ -340,7 +355,6 @@ class RegionalSDF {
         let contour = extractBoundaryContour()
         guard !contour.isEmpty else { return fovMap }
         let indexMap = buildBoundaryIndexMap(contour: contour)
-        let contourCount = contour.count
         
         let debugSet = Set(debugCoords.map { inside.index($0) })
 
@@ -348,6 +362,9 @@ class RegionalSDF {
             for x in 0..<w {
                 let p: Coord2D = (x,y)
                 let indexP = inside.index(p)
+                if debugSet.contains(indexP) {
+                    logDebug("Processing \(p)")
+                }
                 if isInside(p) { continue } // only exterior
                 let parentIdx = closestParent.getValue(p)
                 if parentIdx < 0 { continue }
@@ -370,8 +387,8 @@ class RegionalSDF {
                 // Walk CW (increasing contour index) for right bound
                 var steps = 0
                 var i = v0
-                while steps < maxSteps {
-                    let j = (i + 1) % contourCount
+                while steps < contour.count {
+                    let j = (i + 1) % contour.count
                     let a = contour[i]
                     let c = contour[j]
                     let ta = unwrap(angle(from: p, to: a), around: theta0)
@@ -385,8 +402,8 @@ class RegionalSDF {
                 // Walk CCW (decreasing contour index) for left bound
                 steps = 0
                 i = v0
-                while steps < maxSteps {
-                    let j = (i - 1 + contourCount) % contourCount
+                while steps < contour.count {
+                    let j = (i - 1 + contour.count) % contour.count
                     let a = contour[i]
                     let c = contour[j]
                     let ta = unwrap(angle(from: p, to: a), around: theta0)
@@ -404,10 +421,9 @@ class RegionalSDF {
                 let va = contour[bestLeftIdx] - p
                 let vb = contour[bestRightIdx] - p
                 let vc = b - p
-                let na = Normalize(CGPoint(x: Double(va.x), y: Double(va.y)))
                 let nb = Normalize(CGPoint(x: Double(vb.x), y: Double(vb.y)))
                 let nc = Normalize(CGPoint(x: Double(vc.x), y: Double(vc.y)))
-                var nMid: CGPoint = CGPoint(x: (na.x + nb.x) / 2.0, y: (na.y + nb.y) / 2.0)
+                var nMid = angleBisector(va, vb)
                 if Dot(nc, nMid) < 0 {
                     // This could happen if we are inside a concave area, and left and right are behind the point
                     // Then, flip nMid to point to the same direction as nc, our closest direction.
@@ -419,10 +435,10 @@ class RegionalSDF {
                 var index = bestRightIdx
                 while index != bestLeftIdx { // CW
                     boundaryPiece.append(contour[index])
-                    index = (index + 1) % contourCount
+                    index = (index + 1) % contour.count
                 }
                 var midPoint = contour[bestRightIdx]
-                var bestCos = Dot(na, nMid)
+                var bestCos = Dot(nb, nMid)
                 for i in 0..<boundaryPiece.count {
                     let pb = boundaryPiece[i]
                     let v = pb - p

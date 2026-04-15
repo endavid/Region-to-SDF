@@ -168,7 +168,8 @@ struct Region_to_SDFTests {
         let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor)
         try regionalSDF.computeSDF()
         let testCoords: [Coord2D] = [(5, 10), (10, 12), (10, 30), (17, 25), (20, 14), (20, 18), (22, 17), (30, 2), (30, 30)]
-        let fovMap = regionalSDF.computeFoV(maxSteps: 48, debugCoords: testCoords, debugPrefix: FileManager.default.temporaryDirectory.appending(path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)"))
+        //let testCoords: [Coord2D] = [(20,14)]
+        let fovMap = regionalSDF.computeFoV(debugCoords: testCoords, debugPrefix: FileManager.default.temporaryDirectory.appending(path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)"))
         if let cgImage = fovMap.left.indexToUVTexture() {
             saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_left.png")
         }

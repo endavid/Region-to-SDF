@@ -66,6 +66,10 @@ func Round(_ a: Double, digits: Int) -> Double {
     return Double(rounded) / m
 }
 
+func +(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+    return CGPoint(x: a.x + b.x, y: a.y + b.y)
+}
+
 func -(_ a: Coord2D, _ b: Coord2D) -> Coord2D {
     return (a.x - b.x, a.y - b.y)
 }
