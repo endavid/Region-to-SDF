@@ -91,6 +91,19 @@ func Dot(_ a: CGPoint, _ b: CGPoint) -> Double {
     return a.x * b.x + a.y * b.y
 }
 
+func Angle(from p: Coord2D, to q: Coord2D) -> Float {
+    let dx = Float(q.x - p.x)
+    let dy = Float(q.y - p.y)
+    return atan2f(dy, dx)
+}
+
+func Unwrap(_ theta: Float, around r: Float) -> Float {
+    var t = theta
+    while t - r > Float.pi { t -= 2*Float.pi }
+    while t - r < -Float.pi { t += 2*Float.pi }
+    return t
+}
+
 // Factorial of a number with a cache
 func Factorial(_ n: Int) -> Double { // 64-bit ints aren't enough for big factorials
     struct CacheData {

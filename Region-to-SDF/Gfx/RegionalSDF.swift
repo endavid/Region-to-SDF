@@ -315,19 +315,6 @@ class RegionalSDF {
         return map
     }
 
-    private func angle(from p: Coord2D, to q: Coord2D) -> Float {
-        let dx = Float(q.x - p.x)
-        let dy = Float(q.y - p.y)
-        return atan2f(dy, dx)
-    }
-
-    private func unwrap(_ theta: Float, around r: Float) -> Float {
-        var t = theta
-        while t - r > Float.pi { t -= 2*Float.pi }
-        while t - r < -Float.pi { t += 2*Float.pi }
-        return t
-    }
-
     private func angleBisector(_ va: Coord2D, _ vb: Coord2D, epsilon: Double = 0.0001) -> CGPoint {
         let na = Normalize(CGPoint(x: Double(va.x), y: Double(va.y)))
         let nb = Normalize(CGPoint(x: Double(vb.x), y: Double(vb.y)))
@@ -376,7 +363,7 @@ class RegionalSDF {
                 // Map parent pixel index to contour index; if not found, skip
                 guard let v0 = indexMap[parentIdx] else { continue }
                 let b = contour[v0]
-                let theta0 = angle(from: p, to: b)
+                let theta0 = Angle(from: p, to: b)
 
                 // Walk forward (right) and backward (left) along contour
                 var bestLeftAngle = theta0
@@ -384,34 +371,57 @@ class RegionalSDF {
                 var bestRightAngle = theta0
                 var bestRightIdx = v0
 
-                // Walk CW (increasing contour index) for right bound
-                var steps = 0
+                // only check half of the surface, to avoid circling around and selecting a left point for right (possible if it's a better angle)
+                let halfCount = contour.count / 2
+                
+                // Walk CCW (decreasing contour index) for right bound
                 var i = v0
-                while steps < contour.count {
-                    let j = (i + 1) % contour.count
-                    let a = contour[i]
-                    let c = contour[j]
-                    let ta = unwrap(angle(from: p, to: a), around: theta0)
-                    let tc = unwrap(angle(from: p, to: c), around: theta0)
-                    let tmax = max(ta, tc)
-                    if tmax > bestRightAngle { bestRightAngle = tmax; bestRightIdx = (ta > tc) ? i : j }
-                    i = j
-                    steps += 1
-                }
-
-                // Walk CCW (decreasing contour index) for left bound
-                steps = 0
-                i = v0
-                while steps < contour.count {
+                for k in 0..<halfCount {
                     let j = (i - 1 + contour.count) % contour.count
                     let a = contour[i]
                     let c = contour[j]
-                    let ta = unwrap(angle(from: p, to: a), around: theta0)
-                    let tc = unwrap(angle(from: p, to: c), around: theta0)
-                    let tmin = min(ta, tc)
-                    if tmin < bestLeftAngle { bestLeftAngle = tmin; bestLeftIdx = (ta < tc) ? i : j }
+                    let ta = Unwrap(Angle(from: p, to: a), around: theta0)
+                    let tc = Unwrap(Angle(from: p, to: c), around: theta0)
+                    let tmax = max(ta, tc)
+                    if tmax > bestRightAngle {
+                        bestRightAngle = tmax
+                        bestRightIdx = (ta > tc) ? i : j
+                        if let path = debugPrefix, debugSet.contains(indexP) {
+                            let rIndex = inside.index(contour[bestRightIdx])
+                            fovMap.setValue((parentIdx, rIndex, inside.index(b)), at: p)
+                            if let cgImage = createFoVDebugImage(coord: p, fovMap: fovMap, boundary: contour) {
+                                let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_R_\(k).png")
+                                CGImageWriteToFile(cgImage, filename: outputURL)
+                                logDebug("🕸️ computeFoV: saved \(outputURL.lastPathComponent)")
+                            }
+                        }
+                    }
                     i = j
-                    steps += 1
+                }
+
+                // Walk CW (increasing contour index) for left bound
+                i = v0
+                for k in 0..<halfCount {
+                    let j = (i + 1) % contour.count
+                    let a = contour[i]
+                    let c = contour[j]
+                    let ta = Unwrap(Angle(from: p, to: a), around: theta0)
+                    let tc = Unwrap(Angle(from: p, to: c), around: theta0)
+                    let tmin = min(ta, tc)
+                    if tmin < bestLeftAngle {
+                        bestLeftAngle = tmin
+                        bestLeftIdx = (ta < tc) ? i : j
+                        if let path = debugPrefix, debugSet.contains(indexP) {
+                            let lIndex = inside.index(contour[bestLeftIdx])
+                            fovMap.setValue((lIndex, parentIdx, inside.index(b)), at: p)
+                            if let cgImage = createFoVDebugImage(coord: p, fovMap: fovMap, boundary: contour) {
+                                let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_L_\(k).png")
+                                CGImageWriteToFile(cgImage, filename: outputURL)
+                                logDebug("🕸️ computeFoV: saved \(outputURL.lastPathComponent)")
+                            }
+                        }
+                    }
+                    i = j
                 }
                 
                 let lIndex = inside.index(contour[bestLeftIdx])
@@ -453,7 +463,7 @@ class RegionalSDF {
                             if let cgImage = createFoVDebugImage(coord: p, fovMap: fovMap, boundary: boundaryPiece) {
                                 let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_\(i).png")
                                 CGImageWriteToFile(cgImage, filename: outputURL)
-                                logDebug("🕸️ computeFoV: debug file saved to \(outputURL)")
+                                logDebug("🕸️ computeFoV: saved \(outputURL.lastPathComponent)")
                             }
                         }
                     }

@@ -35,6 +35,20 @@ struct Region_to_SDFTests {
         #expect(IsClose(atan2(p.y, p.x), atan2(n.y, n.x), epsilon: 1e-6))
     }
     
+    @Test func angles() {
+        #expect(IsClose(Angle(from: (20,14), to: (21,14)), 0))
+        #expect(IsClose(Angle(from: (20,14), to: (20,13)), -PI_2))
+        #expect(IsClose(Angle(from: (20,14), to: (20,15)), PI_2))
+        #expect(IsClose(Angle(from: (20,14), to: (19,14)), PI))
+        #expect(IsClose(Angle(from: (20,14), to: (19,12)), -2.0344439))
+    }
+    
+    @Test func angleUnwrap() {
+        #expect(IsClose(Unwrap(PI, around: PI), PI))
+        #expect(IsClose(Unwrap(PI, around: 0), -PI))
+        #expect(IsClose(Unwrap(PI, around: PI_2), PI))
+    }
+    
     @Test(
         "Regional SDF",
         arguments: [
@@ -167,9 +181,8 @@ struct Region_to_SDFTests {
         let sampler = ImageSampler(image: image)
         let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor)
         try regionalSDF.computeSDF()
-        let testCoords: [Coord2D] = [(5, 10), (10, 12), (10, 30), (17, 25), (20, 14), (20, 18), (22, 17), (30, 2), (30, 30)]
-        //let testCoords: [Coord2D] = [(20,14)]
-        let fovMap = regionalSDF.computeFoV(debugCoords: testCoords, debugPrefix: FileManager.default.temporaryDirectory.appending(path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)"))
+        let debugCoords: [Coord2D] = [(20,14), (30, 11)]
+        let fovMap = regionalSDF.computeFoV(debugCoords: debugCoords, debugPrefix: FileManager.default.temporaryDirectory.appending(path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)"))
         if let cgImage = fovMap.left.indexToUVTexture() {
             saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_left.png")
         }
@@ -179,6 +192,7 @@ struct Region_to_SDFTests {
         if let cgImage = fovMap.mid.indexToUVTexture() {
             saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_mid.png")
         }
+        let testCoords: [Coord2D] = [(5, 10), (10, 12), (10, 30), (17, 25), (20, 14), (20, 18), (22, 17), (30, 2), (30, 11), (30, 30)]
         for c in testCoords {
             if let cgImage = regionalSDF.createFoVDebugImage(coord: c, fovMap: fovMap) {
                 saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_\(c.x)_\(c.y).png")
