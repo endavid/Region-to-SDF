@@ -199,9 +199,13 @@ struct Region_to_SDFTests {
             }
         }
         let adf = regionalSDF.computeAngularDistanceField(fovMap: fovMap)
-        let adfImage = RegionalSDF.adfToRGBAImage(adf)
+        let adfImage = RegionalSDF.fcdfToRGBAImage(adf)
         if let cgImage = adfImage.toCGImage() {
-            saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_adf.png")
+            saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_fcdf.png")
+        }
+        let closest = regionalSDF.getClosestBorder()
+        if let cgImage = closest.indexToUVTexture() {
+            saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_closest_uv.png")
         }
     }
 

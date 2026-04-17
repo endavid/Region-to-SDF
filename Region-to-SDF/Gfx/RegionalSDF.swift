@@ -302,15 +302,20 @@ class RegionalSDF {
             }
         }
         // there could still be thin edges we ignored...
-        for iCoord in missingSet {
-            let coord = inside.indexToCoord(iCoord)
-            for n in inside.get8ValidNeighbors(coord) {
-                let i = inside.index(n)
-                if let idx = map[i] {
-                    map[iCoord] = idx
-                    break
+        while !missingSet.isEmpty {
+            var newMissingSet = missingSet
+            for iCoord in missingSet {
+                let coord = inside.indexToCoord(iCoord)
+                for n in inside.get8ValidNeighbors(coord) {
+                    let i = inside.index(n)
+                    if let idx = map[i] {
+                        map[iCoord] = idx
+                        newMissingSet.remove(iCoord)
+                        break
+                    }
                 }
             }
+            missingSet = newMissingSet
         }
         return map
     }
@@ -361,7 +366,10 @@ class RegionalSDF {
                     continue
                 }
                 // Map parent pixel index to contour index; if not found, skip
-                guard let v0 = indexMap[parentIdx] else { continue }
+                guard let v0 = indexMap[parentIdx] else {
+                    logDebug("Failed to find contour index for \(p)")
+                    continue
+                }
                 let b = contour[v0]
                 let theta0 = Angle(from: p, to: b)
 
@@ -461,7 +469,7 @@ class RegionalSDF {
                             let mIndex = inside.index(midPoint)
                             fovMap.setValue((lIndex, rIndex, mIndex), at: p)
                             if let cgImage = createFoVDebugImage(coord: p, fovMap: fovMap, boundary: boundaryPiece) {
-                                let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_\(i).png")
+                                let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_M_\(i).png")
                                 CGImageWriteToFile(cgImage, filename: outputURL)
                                 logDebug("🕸️ computeFoV: saved \(outputURL.lastPathComponent)")
                             }
@@ -474,32 +482,47 @@ class RegionalSDF {
         }
         return fovMap
     }
+        
+    /// FoV Constrained Distance Field (FCDF), a name I came up with, where I pack the Field of View and distances to the region.
+    typealias FCDF = (x: Int, y: Int, dFar: Float, cosine: Float)
     
-    /// AngularDistanceField (ADF) is a name I came up with. We store 4 floats to approximate the distance a ray has to travel to hit a border
-    typealias ADF = (angle: Float, dClose: Float, dFar: Float, cosine: Float)
-    
-    func computeAngularDistanceField(fovMap: SimpleImage<FoV>) -> SimpleImage<ADF> {
+    func computeAngularDistanceField(fovMap: SimpleImage<FoV>) -> SimpleImage<FCDF> {
         let euclidean = getEuclideanSDF()
-        var img = SimpleImage<ADF>(width: width, height: height, repeating: (0,0,0,0))
+        var img = SimpleImage<FCDF>(width: width, height: height, repeating: (0,0,0,0))
         img.setAll() { i, coord in
-            let dClose = abs(euclidean.data[i])
             if inside.data[i] == 1 || (fovMap.data[i].left == i && fovMap.data[i].right == i) {
                 // inside, or border points pointing at themselves
-                return (0, dClose, dClose, -1)
+                return (0, 0, 0, -1)
             }
             // we have 2 point that define a wedge
             let vl = inside.indexToCoord(fovMap.data[i].left) - coord
             let vr = inside.indexToCoord(fovMap.data[i].right) - coord
             let vm = inside.indexToCoord(fovMap.data[i].mid) - coord
-            let angle = atan2f(Float(vm.y), Float(vm.x))
             let dl = Length(vl)
             let dr = Length(vr)
             let dFar = (dl + dr) / 2.0
             let nl = Normalize(CGPoint(x: Double(vl.x), y: Double(vl.y)))
             let nm = Normalize(CGPoint(x: Double(vm.x), y: Double(vm.y)))
             let cosine = Dot(nl, nm)
-            return (Float(angle), dClose, dFar, Float(cosine))
+            return (vm.x, vm.y, dFar, Float(cosine))
         }
+        
+        // smooth interior points close to the border to avoid later issues when doing bilinear interpolation
+        for i in 0..<img.data.count {
+            let v = img.data[i]
+            if v.x == 0 && v.y == 0 {
+                // inside, or border points pointing at themselves
+                let outsiders = img.get8ValidNeighbors(img.indexToCoord(i)).filter { c in
+                    let vn = img.getValue(c)
+                    return vn.x != 0 || vn.y != 0
+                }
+                if outsiders.count > 0 {
+                    let sum = outsiders.reduce(0) { $0 + img.getValue($1).cosine }
+                    img.data[i].cosine = Float(sum) / Float(outsiders.count)
+                }
+            }
+        }
+        
         return img
     }
     
@@ -557,19 +580,23 @@ class RegionalSDF {
         return img
     }
     
-    static func adfToRGBAImage(_ adf: SimpleImage<ADF>) -> SimpleImage<UInt32> {
-        let w = adf.width
-        let h = adf.height
+    static func fcdfToRGBAImage(_ fcdf: SimpleImage<FCDF>) -> SimpleImage<UInt32> {
+        let w = fcdf.width
+        let h = fcdf.height
         var img = SimpleImage<UInt32>(width: w, height: h, repeating: 0)
         // hypotenuse
         let maxDistance = sqrtf(Float(w * w + h * h))
-        img.data = adf.data.map { v in
-            let angle = 0.5 * v.angle / PI + 0.5
-            let dClose = v.dClose / maxDistance
+        img.data = fcdf.data.map { v in
+            // normalize direction by dFar -- we will be able to reconstruct the actual distance by multiplying by dFar
+            // in principle, (Length(v) < dFar), but there are some precision issues
+            let dn = Length((v.x, v.y))
+            let d = max(max(v.dFar, dn), 0.0001)
+            let x = 0.5 * Float(v.x) / d + 0.5
+            let y = 0.5 * Float(v.y) / d + 0.5
             let dFar = v.dFar / maxDistance
             let cosine = 0.5 * v.cosine + 0.5
-            let r = UInt32(roundf(255.0 * angle)) & 0xff
-            let g = UInt32(roundf(255.0 * dClose)) & 0xff
+            let r = UInt32(roundf(255.0 * x)) & 0xff
+            let g = UInt32(roundf(255.0 * y)) & 0xff
             let b = UInt32(roundf(255.0 * dFar)) & 0xff
             let a = UInt32(roundf(255.0 * cosine)) & 0xff
             return UInt32(r << 24 | g << 16 | b << 8 | a)
