@@ -65,7 +65,7 @@ class RegionalSDF {
     func getClosestBorder() -> SimpleImage<Int> {
         return closestParent
     }
-    
+        
     init(sampler: ImageSampler, regionColor: ColorRGB, epsilon: Float = 5.0 / 255.0) {
         let w = sampler.width
         let h = sampler.height
@@ -488,11 +488,16 @@ class RegionalSDF {
     
     func computeAngularDistanceField(fovMap: SimpleImage<FoV>) -> SimpleImage<FCDF> {
         let euclidean = getEuclideanSDF()
+        let minValue = euclidean.minValue() // it should be negative inside
+        
         var img = SimpleImage<FCDF>(width: width, height: height, repeating: (0,0,0,0))
         img.setAll() { i, coord in
             if inside.data[i] == 1 || (fovMap.data[i].left == i && fovMap.data[i].right == i) {
                 // inside, or border points pointing at themselves
-                return (0, 0, 0, -1)
+                
+                // normalized distance, so it's 0 close to the border, and 1 furthest away
+                let d = abs(euclidean.data[i] / minValue)
+                return (0, 0, d, -1)
             }
             // we have 2 point that define a wedge
             let vl = inside.indexToCoord(fovMap.data[i].left) - coord
@@ -506,23 +511,7 @@ class RegionalSDF {
             let cosine = Dot(nl, nm)
             return (vm.x, vm.y, dFar, Float(cosine))
         }
-        
-        // smooth interior points close to the border to avoid later issues when doing bilinear interpolation
-        for i in 0..<img.data.count {
-            let v = img.data[i]
-            if v.x == 0 && v.y == 0 {
-                // inside, or border points pointing at themselves
-                let outsiders = img.get8ValidNeighbors(img.indexToCoord(i)).filter { c in
-                    let vn = img.getValue(c)
-                    return vn.x != 0 || vn.y != 0
-                }
-                if outsiders.count > 0 {
-                    let sum = outsiders.reduce(0) { $0 + img.getValue($1).cosine }
-                    img.data[i].cosine = Float(sum) / Float(outsiders.count)
-                }
-            }
-        }
-        
+                
         return img
     }
     
@@ -593,7 +582,11 @@ class RegionalSDF {
             let d = max(max(v.dFar, dn), 0.0001)
             let x = 0.5 * Float(v.x) / d + 0.5
             let y = 0.5 * Float(v.y) / d + 0.5
-            let dFar = v.dFar / maxDistance
+            var dFar = v.dFar
+            if v.x != 0 || v.y != 0 {
+                // only normalize points outside (inside we already normalized them by minValue, to create a smooth falloff later)
+                dFar = v.dFar / maxDistance
+            }
             let cosine = 0.5 * v.cosine + 0.5
             let r = UInt32(roundf(255.0 * x)) & 0xff
             let g = UInt32(roundf(255.0 * y)) & 0xff

@@ -318,8 +318,12 @@ struct ContentView: View {
     private func makeSDF(for color: Color, sampler: ImageSampler, epsilon: Float) throws -> (RegionalSDF, CGImage?) {
         let sdf = RegionalSDF(sampler: sampler, regionColor: color.colorRGB, epsilon: epsilon)
         try sdf.computeSDF()
+        let fovMap = sdf.computeFoV()
+        let fcdf = sdf.computeAngularDistanceField(fovMap: fovMap)
+        let img = RegionalSDF.fcdfToRGBAImage(fcdf)
+        let cg = img.toCGImage()
         //let cg = sdf.toRGImage(maxContrast: true).toCGImage()
-        let cg = sdf.toGrayImage().toCGImage()
+        //let cg = sdf.toGrayImage().toCGImage()
         return (sdf, cg)
     }
     

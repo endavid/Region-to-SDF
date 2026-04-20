@@ -215,3 +215,9 @@ extension SimpleImage where T == Int {
             )
     }
 }
+
+extension SimpleImage where T == Float {
+    func minValue() -> Float {
+        return data.reduce(Float.maxFloat) { min($0, $1) }
+    }
+}

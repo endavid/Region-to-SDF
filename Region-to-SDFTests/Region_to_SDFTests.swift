@@ -52,11 +52,11 @@ struct Region_to_SDFTests {
     @Test(
         "Regional SDF",
         arguments: [
-            (regionColor: ColorRGB(hexValue: 0xf7c164), testCoord: (28, 2), expectedSdf: -4.83, expectedEuclidean: -4.472, closestIndex: 218),
-            (regionColor: ColorRGB(hexValue: 0x2f8fec), testCoord: (15, 15), expectedSdf: -2.83, expectedEuclidean: -2.83, closestIndex: 557)
+            (regionColor: ColorRGB(hexValue: 0xf7c164), minValue: -8, testCoord: (28, 2), expectedSdf: -4.83, expectedEuclidean: -4.472, closestIndex: 218),
+            (regionColor: ColorRGB(hexValue: 0x2f8fec), minValue: -3.6055, testCoord: (15, 15), expectedSdf: -2.83, expectedEuclidean: -2.83, closestIndex: 557)
         ]
     )
-    func regionalSDF(regionColor: ColorRGB, testCoord: Coord2D, expectedSdf: Float, expectedEuclidean: Float, closestIndex: Int) throws {
+    func regionalSDF(regionColor: ColorRGB, minValue: Float, testCoord: Coord2D, expectedSdf: Float, expectedEuclidean: Float, closestIndex: Int) throws {
         // Resolve the test bundle for this test type
         let testBundle = Bundle(for: SelfClass.self)
         // Alternatively: Bundle.module if using SwiftPM test target with resources
@@ -89,6 +89,8 @@ struct Region_to_SDFTests {
         }
         let sdf = regionalSDF.getSDF()
         let euclideanSdf = regionalSDF.getEuclideanSDF()
+        let minDistance = euclideanSdf.minValue()
+        #expect(IsClose(minDistance, minValue))
         if let cgImage = RegionalSDF.distanceToRGImage(sdf, maxContrast: false).toCGImage() {
             saveImage(cgImage, path: "regionalSDF_test_\(regionColor.hexString)_sdf.png")
         }
