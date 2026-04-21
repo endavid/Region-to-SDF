@@ -10,6 +10,11 @@ import UniformTypeIdentifiers
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
+enum DistanceFunction: String, CaseIterable, Identifiable {
+    case SignedGray, SignedRedGreen, FieldOfView
+    var id: Self { self }
+}
+
 struct ContentView: View {
     @State private var droppedImage: NSImage? = nil
     @State private var displayedImage: Image? = nil
@@ -18,6 +23,8 @@ struct ContentView: View {
     @State private var palette: [Color] = []
     @State private var lastTapPoint: CGPoint? = nil
     @State private var lastImageRect: CGRect = .zero
+    
+    @State private var selectedDF: DistanceFunction = .FieldOfView
     
     @State private var generatedSDFs: [RegionalSDF] = []
     @State private var generatedCGImages: [CGImage] = []
@@ -60,7 +67,7 @@ struct ContentView: View {
                                     .padding()
                                 }
                             } // ZStack
-                            .frame(minWidth: 80, maxWidth: 240, minHeight: 80, maxHeight: 240)
+                            .frame(minWidth: 80, maxWidth: 180, minHeight: 80, maxHeight: 180)
                             .contentShape(Rectangle())
                             .onDrop(of: [UTType.image, UTType.fileURL], isTargeted: nil) { providers in
                                 handleDrop(providers: providers)
@@ -79,6 +86,11 @@ struct ContentView: View {
                             .padding(.horizontal, 4)
                             .padding(.vertical, 8)
 
+                            Picker("DF", selection: $selectedDF) {
+                                    ForEach(DistanceFunction.allCases) { df in
+                                        Text(df.rawValue)
+                                    }
+                                }
                             // Actions
                             Button(action: {
                                 Task { await computeAllSDFs() }
@@ -91,6 +103,12 @@ struct ContentView: View {
                             Button(action: { exportGeneratedImages() }) {
                                 Image(systemName: "square.and.arrow.up")
                                 Text("Export Images")
+                            }
+                            .disabled(generatedCGImages.isEmpty)
+                            
+                            Button(action: { exportAtlas() }) {
+                                Image(systemName: "square.and.arrow.up")
+                                Text("Export Atlas")
                             }
                             .disabled(generatedCGImages.isEmpty)
                         }
@@ -316,15 +334,24 @@ struct ContentView: View {
         
     // MARK: - SDF Batch Generation
     private func makeSDF(for color: Color, sampler: ImageSampler, epsilon: Float) throws -> (RegionalSDF, CGImage?) {
-        let sdf = RegionalSDF(sampler: sampler, regionColor: color.colorRGB, epsilon: epsilon)
-        try sdf.computeSDF()
-        let fovMap = sdf.computeFoV()
-        let fcdf = sdf.computeAngularDistanceField(fovMap: fovMap)
-        let img = RegionalSDF.fcdfToRGBAImage(fcdf)
-        let cg = img.toCGImage()
-        //let cg = sdf.toRGImage(maxContrast: true).toCGImage()
-        //let cg = sdf.toGrayImage().toCGImage()
-        return (sdf, cg)
+        let rdf = RegionalSDF(sampler: sampler, regionColor: color.colorRGB, epsilon: epsilon)
+        try rdf.computeSDF()
+        if selectedDF == .FieldOfView {
+            let fovMap = rdf.computeFoV()
+            let fcdf = rdf.computeAngularDistanceField(fovMap: fovMap)
+            let img = RegionalSDF.fcdfToRGBAImage(fcdf)
+            return (rdf, img.toCGImage())
+        }
+        let sdf = rdf.getEuclideanSDF()
+        if selectedDF == .SignedRedGreen {
+            let img = RegionalSDF.distanceToRGImage(sdf, maxContrast: true)
+            return (rdf, img.toCGImage())
+        }
+        if selectedDF == .SignedGray {
+            let img = RegionalSDF.distanceToGrayImage(sdf)
+            return (rdf, img.toCGImage())
+        }
+        return (rdf, nil)
     }
     
     private func exportGeneratedImages() {
@@ -335,9 +362,21 @@ struct ContentView: View {
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
         panel.title = "Choose export folder"
-        panel.message = "Export generated SDF images as PNG"
+        panel.message = "Export generated DF images as PNG"
         if panel.runModal() == .OK, let url = panel.url {
             exportImages(to: url)
+        }
+    }
+    
+    private func exportAtlas() {
+        guard !generatedCGImages.isEmpty else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.prompt = "Choose"
+        panel.title = "Choose export image name"
+        panel.message = "Export generated DF images as a single PNG"
+        if panel.runModal() == .OK, let url = panel.url {
+            generateAndExportAtlas(to: url)
         }
     }
 
@@ -352,6 +391,21 @@ struct ContentView: View {
             } else {
                 Logger.shared.err("Failed to create destination for \(fileURL.path)")
             }
+        }
+    }
+    
+    private func generateAndExportAtlas(to fileURL: URL) {
+        guard let cg = ConcatenateVertical(images: generatedCGImages) else {
+            Logger.shared.err("Failed to create atlas")
+            return
+        }
+        if let dest = CGImageDestinationCreateWithURL(fileURL as CFURL, UTType.png.identifier as CFString, 1, nil) {
+            CGImageDestinationAddImage(dest, cg, nil)
+            if !CGImageDestinationFinalize(dest) {
+                Logger.shared.err("Failed to write \(fileURL.lastPathComponent)")
+            }
+        } else {
+            Logger.shared.err("Failed to create destination for \(fileURL.path)")
         }
     }
 
@@ -383,25 +437,41 @@ struct ContentView: View {
         guard let imageSampler else { return ([], []) }
         let epsilon = computeEpsilon()
         // Run per-color computations in parallel
-        return await withTaskGroup(of: (RegionalSDF?, CGImage?).self) { group in
-            for color in palette {
+        return await withTaskGroup(of: (Int, RegionalSDF?, CGImage?).self) { group in
+            for index in 0..<palette.count {
+                let color = palette[index]
                 group.addTask {
                     do {
                         let (sdf, cg) = try await makeSDF(for: color, sampler: imageSampler, epsilon: epsilon)
-                        return (sdf, cg)
+                        return (index, sdf, cg)
                     } catch {
                         await Logger.shared.err("SDF failed: \(error.localizedDescription)")
-                        return (nil, nil)
+                        return (index, nil, nil)
                     }
                 }
             }
-            var sdfs: [RegionalSDF] = []
+            var rdfs: [RegionalSDF] = []
             var images: [CGImage] = []
+            var order: [Int: Int] = [:]
+            var i = 0
             for await result in group {
-                if let sdf = result.0 { sdfs.append(sdf) }
-                if let cg = result.1 { images.append(cg) }
+                if let rdf = result.1, let cg = result.2 {
+                    rdfs.append(rdf)
+                    images.append(cg)
+                    order[result.0] = i
+                    i += 1
+                }
             }
-            return (sdfs, images)
+            // sort using order
+            var sortedRdfs: [RegionalSDF] = []
+            var sortedImages: [CGImage] = []
+            let keys = order.keys.sorted()
+            for k in keys {
+                let i = order[k]!
+                sortedRdfs.append(rdfs[i])
+                sortedImages.append(images[i])
+            }
+            return (sortedRdfs, sortedImages)
         }
     }
 
