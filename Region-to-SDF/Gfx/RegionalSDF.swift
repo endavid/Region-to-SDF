@@ -71,8 +71,8 @@ class RegionalSDF {
         let h = sampler.height
         distances = SimpleImage<Float>(width: w, height: h, repeating: RegionalSDF.BigValue)
         visited = SimpleImage<UInt8>(width: w, height: h, repeating: 0)
-        inside = SimpleImage<UInt8>(width: w, height: h, repeating: 0)
         closestParent = SimpleImage<Int>(width: w, height: h, repeating: -1)
+        var inside = SimpleImage<UInt8>(width: w, height: h, repeating: 0)
         // Build inside mask
         for y in 0..<h {
             for x in 0..<w {
@@ -81,6 +81,8 @@ class RegionalSDF {
                 inside.setValue(isIn, at: (x,y))
             }
         }
+        // grow region to add some extra margin
+        self.inside = inside.growMask(maskValue: 1)
     }
     
     private func findBoundaryPixels() -> [Coord2D] {
@@ -349,6 +351,8 @@ class RegionalSDF {
         let indexMap = buildBoundaryIndexMap(contour: contour)
         
         let debugSet = Set(debugCoords.map { inside.index($0) })
+        // only check half of the surface, to avoid circling around and selecting a left point for right (possible if it's a better angle)
+        let halfCount = contour.count / 2
 
         for y in 0..<h {
             for x in 0..<w {
@@ -357,9 +361,11 @@ class RegionalSDF {
                 if debugSet.contains(indexP) {
                     logDebug("Processing \(p)")
                 }
-                if isInside(p) { continue } // only exterior
                 let parentIdx = closestParent.getValue(p)
-                if parentIdx < 0 { continue }
+                if parentIdx < 0 {
+                    logDebug("Missing parent for \(p)")
+                    continue
+                }
                 // because the border is thicker, some points aren't really "inside" but are treated as such
                 if parentIdx == indexP {
                     fovMap.setValue((parentIdx, parentIdx, parentIdx), at: p)
@@ -370,7 +376,40 @@ class RegionalSDF {
                     logDebug("Failed to find contour index for \(p)")
                     continue
                 }
+                
+                // boundary point coordinate
                 let b = contour[v0]
+
+                if isInside(p) {
+                    // get longest distance
+                    var longest = Length(b - p) // start with shortest distance
+                    var best = b
+                    let quarter = halfCount / 2
+                    var i = v0
+                    // CCW
+                    for _ in 0..<quarter {
+                        i = (i - 1 + contour.count) % contour.count
+                        let bi = contour[i]
+                        let d = Length(bi - p)
+                        if d > longest {
+                            longest = d
+                            best = bi
+                        }
+                    }
+                    // CW
+                    for _ in 0..<quarter {
+                        i = (i + 1) % contour.count
+                        let bi = contour[i]
+                        let d = Length(bi - p)
+                        if d > longest {
+                            longest = d
+                            best = bi
+                        }
+                    }
+                    let index = inside.index(best)
+                    fovMap.setValue((index, index, parentIdx), at: p)
+                    continue
+                }
                 let theta0 = Angle(from: p, to: b)
 
                 // Walk forward (right) and backward (left) along contour
@@ -378,9 +417,6 @@ class RegionalSDF {
                 var bestLeftIdx = v0
                 var bestRightAngle = theta0
                 var bestRightIdx = v0
-
-                // only check half of the surface, to avoid circling around and selecting a left point for right (possible if it's a better angle)
-                let halfCount = contour.count / 2
                 
                 // Walk CCW (decreasing contour index) for right bound
                 var i = v0
@@ -487,29 +523,25 @@ class RegionalSDF {
     typealias FCDF = (x: Int, y: Int, dFar: Float, cosine: Float)
     
     func computeAngularDistanceField(fovMap: SimpleImage<FoV>) -> SimpleImage<FCDF> {
-        let euclidean = getEuclideanSDF()
-        let minValue = euclidean.minValue() // it should be negative inside
-        
         var img = SimpleImage<FCDF>(width: width, height: height, repeating: (0,0,0,0))
         img.setAll() { i, coord in
+            let leftPoint = inside.indexToCoord(fovMap.data[i].left)
+            let vl = leftPoint - coord
+            let dl = Length(vl)
+            let midPoint = inside.indexToCoord(fovMap.data[i].mid)
             if inside.data[i] == 1 || (fovMap.data[i].left == i && fovMap.data[i].right == i) {
                 // inside, or border points pointing at themselves
-                
-                // normalized distance, so it's 0 close to the border, and 1 furthest away
-                let d = abs(euclidean.data[i] / minValue)
-                return (0, 0, d, -1)
+                return (midPoint.x, midPoint.y, dl, -1)
             }
             // we have 2 point that define a wedge
-            let vl = inside.indexToCoord(fovMap.data[i].left) - coord
             let vr = inside.indexToCoord(fovMap.data[i].right) - coord
-            let vm = inside.indexToCoord(fovMap.data[i].mid) - coord
-            let dl = Length(vl)
+            let vm = midPoint - coord
             let dr = Length(vr)
             let dFar = (dl + dr) / 2.0
             let nl = Normalize(CGPoint(x: Double(vl.x), y: Double(vl.y)))
             let nm = Normalize(CGPoint(x: Double(vm.x), y: Double(vm.y)))
             let cosine = Dot(nl, nm)
-            return (vm.x, vm.y, dFar, Float(cosine))
+            return (midPoint.x, midPoint.y, dFar, Float(cosine))
         }
                 
         return img
@@ -573,23 +605,15 @@ class RegionalSDF {
         let w = fcdf.width
         let h = fcdf.height
         var img = SimpleImage<UInt32>(width: w, height: h, repeating: 0)
-        // hypotenuse
-        let maxDistance = sqrtf(Float(w * w + h * h))
-        img.data = fcdf.data.map { v in
-            // normalize direction by dFar -- we will be able to reconstruct the actual distance by multiplying by dFar
-            // in principle, (Length(v) < dFar), but there are some precision issues
-            let dn = Length((v.x, v.y))
-            let d = max(max(v.dFar, dn), 0.0001)
-            let x = 0.5 * Float(v.x) / d + 0.5
-            let y = 0.5 * Float(v.y) / d + 0.5
-            var dFar = v.dFar
-            if v.x != 0 || v.y != 0 {
-                // only normalize points outside (inside we already normalized them by minValue, to create a smooth falloff later)
-                dFar = v.dFar / maxDistance
-            }
-            let cosine = 0.5 * v.cosine + 0.5
-            let r = UInt32(roundf(255.0 * x)) & 0xff
-            let g = UInt32(roundf(255.0 * y)) & 0xff
+        img.data = fcdf.data.map { value in
+            // uv coordinates of the closest (or mid) point
+            let u = Float(value.x) / Float(w)
+            let v = Float(value.y) / Float(h)
+            // normalize by width (if further away, we don't care)
+            var dFar = min(1.0, value.dFar / Float(w))
+            let cosine = 0.5 * value.cosine + 0.5
+            let r = UInt32(roundf(255.0 * u)) & 0xff
+            let g = UInt32(roundf(255.0 * v)) & 0xff
             let b = UInt32(roundf(255.0 * dFar)) & 0xff
             let a = UInt32(roundf(255.0 * cosine)) & 0xff
             return UInt32(r << 24 | g << 16 | b << 8 | a)

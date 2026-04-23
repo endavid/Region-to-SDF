@@ -75,10 +75,29 @@ struct SimpleImage<T> {
         self.height = height
         self.data = [T].init(repeating: value, count: width * height)
     }
-    
+        
     func toCGImage() -> CGImage? {
         logDebug("Unsupported type: \(T.self)")
         return nil
+    }
+}
+
+extension SimpleImage where T: Equatable {
+    func growMask(maskValue: T) -> SimpleImage<T> {
+        var out = self
+        for y in 0..<height {
+            for x in 0..<width {
+                let p = (x,y)
+                let ns = get8ValidNeighbors(p)
+                for n in ns {
+                    if getValue(n) == maskValue {
+                        out.setValue(maskValue, at: p)
+                        break
+                    }
+                }
+            }
+        }
+        return out
     }
 }
 
