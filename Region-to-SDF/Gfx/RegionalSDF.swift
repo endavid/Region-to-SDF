@@ -548,6 +548,21 @@ class RegionalSDF {
     }
     
     
+    func computeDensityField() -> SimpleImage<CircularHarmonics> {
+        let dummyCH = CircularHarmonics(order: 0)
+        var out = SimpleImage<CircularHarmonics>(width: width, height: height, repeating: dummyCH)
+        let minValue = distances.minValue()
+        var densityImg = distances
+        // normalize, so at the center of the region the density is 1, and it decreases to 0 at the boundary and outside
+        distances.setAll() { i in
+            distances.data[i] >= 0 ? 0 : distances.data[i] / minValue
+        }
+        
+        // TODO: ray trace from every pixel in 32 directions, compute the integral (sum of densities), compute the FFT, and store DFT coefficients in out
+        
+        return out
+    }
+    
     // MARK: Image conversion
     
     static func distanceToGrayImage(_ sdf: SimpleImage<Float>) -> SimpleImage<UInt8> {
