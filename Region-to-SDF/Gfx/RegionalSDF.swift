@@ -783,7 +783,33 @@ extension SimpleImage where T == CircularHarmonics {
             return max(candidate, aMax, bMax)
         }
     }
-    
+    func rangesA() -> [(Float, Float)] {
+        guard let first = data.first else { return [] }
+        let ranges = (0...first.order).map { order in
+            let minA = data.reduce(Float.maxFloat) { candidate, ch in
+                min(candidate, ch.a[order])
+            }
+            let maxA = data.reduce(-Float.maxFloat) { candidate, ch in
+                max(candidate, ch.a[order])
+            }
+            return (minA, maxA)
+        }
+        return ranges
+    }
+    func rangesB() -> [(Float, Float)] {
+        guard let first = data.first else { return [] }
+        let ranges = (0...first.order).map { order in
+            let minB = data.reduce(Float.maxFloat) { candidate, ch in
+                min(candidate, ch.b[order])
+            }
+            let maxB = data.reduce(-Float.maxFloat) { candidate, ch in
+                max(candidate, ch.b[order])
+            }
+            return (minB, maxB)
+        }
+        return ranges
+    }
+
     /// Evaluates the density for a given direction
     func evaluate(direction: SIMD2<Float>) -> SimpleImage<Float> {
         var out = SimpleImage<Float>(width: width, height: height, repeating: 0)
@@ -791,5 +817,63 @@ extension SimpleImage where T == CircularHarmonics {
             data[i].evaluate(direction: direction)
         }
         return out
+    }
+    
+    func toCGImage() -> CGImage? {
+        let bitsPerComponent = 16
+        let channelCount = 4
+        let bitsPerPixel = channelCount * bitsPerComponent
+        let bytesPerPixel = bitsPerPixel / 8
+        // 2 * width: coeffs(a) to the left, coeffs(b) to the right
+        let w2 = 2 * width
+        let pixelCount = w2 * height
+        var buffer = [UInt16].init(repeating: 0, count: pixelCount * bytesPerPixel)
+        
+        // normalize assuming not any coefficient will be greater than a quarter of the width
+        let Lmax = Float(width / 4)
+        func toUInt16(_ v: Float) -> UInt16 {
+            let scaled = Clamp(round(65535.0 * (0.5 * v / Lmax + 0.5)), low: 0.0, high: 65535.0)
+            return UInt16(scaled)
+        }
+        
+        guard let f = data.first else {
+            return nil
+        }
+        if f.order < 3 {
+            Logger.shared.log("Minimum order supported is 3")
+            return nil
+        }
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = index((x,y))
+                let c = data[i]
+                let j = w2 * y + x
+                buffer[j * 4] = toUInt16(c.a[0])
+                buffer[j * 4 + 1] = toUInt16(c.a[1])
+                buffer[j * 4 + 2] = toUInt16(c.a[2])
+                buffer[j * 4 + 3] = toUInt16(c.a[3])
+                buffer[(j + width) * 4] = toUInt16(c.b[0])
+                buffer[(j + width) * 4 + 1] = toUInt16(c.b[1])
+                buffer[(j + width) * 4 + 2] = toUInt16(c.b[2])
+                buffer[(j + width) * 4 + 3] = toUInt16(c.b[3])
+            }
+        }
+        guard let provider = CGDataProvider(data: NSData(bytes: &buffer, length: pixelCount * bytesPerPixel * MemoryLayout<UInt16>.size)) else {
+            return nil
+        }
+        let bitmapInfo:CGBitmapInfo = [.byteOrder16Little, CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue)]
+        return CGImage(
+            width: w2,
+            height: height,
+            bitsPerComponent: bitsPerComponent,
+            bitsPerPixel: bitsPerPixel,
+            bytesPerRow: 2 * width * bytesPerPixel,
+            space: CGColorSpace(name: CGColorSpace.linearSRGB)!,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+            )
     }
 }

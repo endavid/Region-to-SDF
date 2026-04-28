@@ -243,6 +243,10 @@ struct Region_to_SDFTests {
         #expect(IsClose(maxValue, expMaxValue))
         #expect(IsClose(minValue, expMinValue))
         #expect(IsClose(densityField.data[0].a[0], expected0a0))
+        let rangesA = densityField.rangesA()
+        let rangesB = densityField.rangesB()
+        print(rangesA)
+        print(rangesB)
         let upwardsDensity = densityField.evaluate(direction: SIMD2(x: 0, y: 1)).normalize()
         let downwardsDensity = densityField.evaluate(direction: SIMD2(x: 0, y: -1)).normalize()
         let leftwardsDensity = densityField.evaluate(direction: SIMD2(x: -1, y: 0)).normalize()
@@ -258,6 +262,9 @@ struct Region_to_SDFTests {
         }
         if let cgImage = rightwardsDensity.toCGImage() {
             saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_rightwards.png")
+        }
+        if let cgImage = densityField.toCGImage() {
+            saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_ftDensityField.png")
         }
     }
     
