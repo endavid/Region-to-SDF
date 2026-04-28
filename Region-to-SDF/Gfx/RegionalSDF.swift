@@ -7,6 +7,7 @@
 
 import Foundation
 import CoreGraphics
+import simd
 
 public enum RegionalSDFError: Error {
     case noRegionFound
@@ -66,7 +67,7 @@ class RegionalSDF {
         return closestParent
     }
         
-    init(sampler: ImageSampler, regionColor: ColorRGB, epsilon: Float = 5.0 / 255.0) {
+    init(sampler: ImageSampler, regionColor: ColorRGB, epsilon: Float = 5.0 / 255.0, grow: Bool = true) {
         let w = sampler.width
         let h = sampler.height
         distances = SimpleImage<Float>(width: w, height: h, repeating: RegionalSDF.BigValue)
@@ -82,7 +83,7 @@ class RegionalSDF {
             }
         }
         // grow region to add some extra margin
-        self.inside = inside.growMask(maskValue: 1)
+        self.inside = grow ? inside.growMask(maskValue: 1) : inside
     }
     
     private func findBoundaryPixels() -> [Coord2D] {
@@ -547,19 +548,98 @@ class RegionalSDF {
         return img
     }
     
-    
-    func computeDensityField() -> SimpleImage<CircularHarmonics> {
-        let dummyCH = CircularHarmonics(order: 0)
-        var out = SimpleImage<CircularHarmonics>(width: width, height: height, repeating: dummyCH)
-        let minValue = distances.minValue()
-        var densityImg = distances
-        // normalize, so at the center of the region the density is 1, and it decreases to 0 at the boundary and outside
-        distances.setAll() { i in
-            distances.data[i] >= 0 ? 0 : distances.data[i] / minValue
+    /// Build a normalized density image from distances
+    func computeNormalizedDensity() -> SimpleImage<Float> {
+        let euclidean = getEuclideanSDF()
+        var densityImg = euclidean // copy
+        let minValue = euclidean.minValue()
+        densityImg.setAllIdx() { i in
+            euclidean.data[i] >= 0 ? 0 : euclidean.data[i] / minValue
         }
-        
-        // TODO: ray trace from every pixel in 32 directions, compute the integral (sum of densities), compute the FFT, and store DFT coefficients in out
-        
+        return densityImg
+    }
+    
+    func computeDensityField(ftOrder: Int = 4) -> SimpleImage<CircularHarmonics> {
+        let densityImg = computeNormalizedDensity()
+        let w = width
+        let h = height
+        let hyp = Float(sqrt(Double(w * w + h * h)))
+        // Output image of CircularHarmonics
+        let chTemplate = CircularHarmonics(order: ftOrder)
+        var out = SimpleImage<CircularHarmonics>(width: w, height: h, repeating: chTemplate)
+
+        // Precompute 32 directions
+        let dirCount = 32
+        let twoPi = Float.pi * 2
+        var dirs: [(dx: Float, dy: Float, angle: Float)] = []
+        dirs.reserveCapacity(dirCount)
+        for i in 0..<dirCount {
+            let theta = (twoPi * Float(i)) / Float(dirCount)
+            dirs.append((cosf(theta), sinf(theta), theta))
+        }
+
+        // Bilinear sampling helper over densityImg.data (float values) in image coordinates
+        func sampleBilinear(_ x: Float, _ y: Float) -> Float {
+            if x < 0 || y < 0 || x > Float(w - 1) || y > Float(h - 1) { return 0 }
+            let x0 = Int(floorf(x))
+            let y0 = Int(floorf(y))
+            let x1 = min(x0 + 1, w - 1)
+            let y1 = min(y0 + 1, h - 1)
+            let tx = x - Float(x0)
+            let ty = y - Float(y0)
+            let v00 = densityImg.getValue((x0, y0))
+            let v10 = densityImg.getValue((x1, y0))
+            let v01 = densityImg.getValue((x0, y1))
+            let v11 = densityImg.getValue((x1, y1))
+            let a = v00 * (1 - tx) + v10 * tx
+            let b = v01 * (1 - tx) + v11 * tx
+            return a * (1 - ty) + b * ty
+        }
+
+        // Ray-march parameters
+        let step: Float = 1.0 // pixel step
+        let maxRadius: Float = hyp
+
+        // For each pixel, integrate along 32 directions and compute angular DFT
+        out.setAll { idx, coord in
+            let cx = Float(coord.x)
+            let cy = Float(coord.y)
+
+            // Accumulate per-direction integrals
+            var integrals = [Float](repeating: 0, count: dirCount)
+            for (i, d) in dirs.enumerated() {
+                var t: Float = 0
+                var sum: Float = 0
+                while t <= maxRadius {
+                    let sx = cx + d.dx * t
+                    let sy = cy + d.dy * t
+                    if sx < 0 || sy < 0 || sx >= Float(w) || sy >= Float(h) { break }
+                    sum += sampleBilinear(sx, sy)
+                    t += step
+                }
+                integrals[i] = sum
+            }
+
+            // Compute DFT coefficients up to `defaultOrder`
+            var ch = CircularHarmonics(order: ftOrder)
+            // k = 0..order (assuming DC plus harmonics)
+            for k in 0...ftOrder {
+                var real: Float = 0
+                var imag: Float = 0
+                for i in 0..<dirCount {
+                    let theta = dirs[i].angle
+                    let value = integrals[i]
+                    real += value * cosf(Float(k) * theta)
+                    imag += -value * sinf(Float(k) * theta)
+                }
+                // normalize by number of samples
+                real /= Float(dirCount)
+                imag /= Float(dirCount)
+                ch.setCoefficient(k: k, real: real, imag: imag)
+            }
+            return ch
+        }
+
         return out
     }
     
@@ -625,7 +705,7 @@ class RegionalSDF {
             let u = Float(value.x) / Float(w)
             let v = Float(value.y) / Float(h)
             // normalize by width (if further away, we don't care)
-            var dFar = min(1.0, value.dFar / Float(w))
+            let dFar = min(1.0, value.dFar / Float(w))
             let cosine = 0.5 * value.cosine + 0.5
             let r = UInt32(roundf(255.0 * u)) & 0xff
             let g = UInt32(roundf(255.0 * v)) & 0xff
@@ -668,22 +748,48 @@ extension SimpleImage where T == RegionalSDF.FoV {
     var left: SimpleImage<Int> {
         get {
             var img = SimpleImage<Int>(width: width, height: height, repeating: -1)
-            img.setAll { self.data[$0].left }
+            img.setAllIdx { self.data[$0].left }
             return img
         }
     }
     var right: SimpleImage<Int> {
         get {
             var img = SimpleImage<Int>(width: width, height: height, repeating: -1)
-            img.setAll { self.data[$0].right }
+            img.setAllIdx { self.data[$0].right }
             return img
         }
     }
     var mid: SimpleImage<Int> {
         get {
             var img = SimpleImage<Int>(width: width, height: height, repeating: -1)
-            img.setAll { self.data[$0].mid }
+            img.setAllIdx { self.data[$0].mid }
             return img
         }
+    }
+}
+
+extension SimpleImage where T == CircularHarmonics {
+    func minValue() -> Float {
+        return data.reduce(Float.maxFloat) { candidate, ch in
+            let aMin = ch.a.min() ?? Float.maxFloat
+            let bMin = ch.b.min() ?? Float.maxFloat
+            return min(candidate, aMin, bMin)
+        }
+    }
+    func maxValue() -> Float {
+        return data.reduce(-Float.maxFloat) { candidate, ch in
+            let aMax = ch.a.max() ?? -Float.maxFloat
+            let bMax = ch.b.max() ?? -Float.maxFloat
+            return max(candidate, aMax, bMax)
+        }
+    }
+    
+    /// Evaluates the density for a given direction
+    func evaluate(direction: SIMD2<Float>) -> SimpleImage<Float> {
+        var out = SimpleImage<Float>(width: width, height: height, repeating: 0)
+        out.setAll() { i, _ in
+            data[i].evaluate(direction: direction)
+        }
+        return out
     }
 }

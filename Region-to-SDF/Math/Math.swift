@@ -51,6 +51,9 @@ func Clamp(_ value: Float, low: Float, high: Float) -> Float {
 func Clamp(_ value: Int, low: Int, high: Int) -> Int {
     return (value<low) ?low:(value>high) ?high:value
 }
+func Saturate(_ value: Float) -> Float {
+    return Clamp(value, low: 0.0, high: 1.0)
+}
 /// Random Int. Preferred to rand() % upperBound
 func Rand(_ upperBound: UInt32) -> UInt32 {
     return arc4random_uniform(upperBound)

@@ -8,6 +8,7 @@ import Foundation
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
+import Dispatch
 
 
 struct SimpleImage<T> {
@@ -40,7 +41,27 @@ struct SimpleImage<T> {
             data[i] = fn(i, indexToCoord(i))
         }
     }
-    mutating func setAll(_ fn: (Int)->T) {
+    mutating func setAllParallel(_ fn: (Int, Coord2D)->T) {
+        // Compute into a separate buffer to avoid data races, then assign.
+        // Work is split by rows so each worker writes to a disjoint slice.
+        var newData = data
+        if newData.count != width * height {
+            newData = [T](repeating: data.first ?? { fatalError("SimpleImage.setAllParallel requires non-empty data or a default value") }(), count: width * height)
+        }
+        DispatchQueue.concurrentPerform(iterations: height) { y in
+            let start = y * width
+            let end = start + width
+            var i = start
+            var x = 0
+            while i < end {
+                newData[i] = fn(i, (x, y))
+                i += 1
+                x += 1
+            }
+        }
+        data = newData
+    }
+    mutating func setAllIdx(_ fn: (Int)->T) {
         for i in 0..<data.count {
             data[i] = fn(i)
         }
@@ -237,6 +258,48 @@ extension SimpleImage where T == Int {
 
 extension SimpleImage where T == Float {
     func minValue() -> Float {
-        return data.reduce(Float.maxFloat) { min($0, $1) }
+        return data.min() ?? -Float.maxFloat
+    }
+    func maxValue() -> Float {
+        return data.max() ?? Float.maxFloat
+    }
+    
+    func normalize() -> SimpleImage<Float> {
+        let minV = minValue()
+        let maxV = maxValue()
+        let range: Float = maxV - minV
+        var out = self
+        out.setAll { idx, _ in
+            return (data[idx] - minV) / range
+        }
+        return out
+    }
+    
+    func toCGImage() -> CGImage? {
+        let pixelCount = width * height
+        let bitsPerComponent = 8
+        var imageBytes = [UInt8].init(repeating: 0, count: pixelCount)
+        for i in 0..<data.count {
+            let c = Clamp(round(255.0 * data[i]), low: 0.0, high: 255.0)
+            imageBytes[i] = UInt8(c)
+        }
+        guard let provider = CGDataProvider(data: NSData(bytes: &imageBytes, length: pixelCount * MemoryLayout<UInt8>.size)) else {
+            return nil
+        }
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue)
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: bitsPerComponent,
+            bitsPerPixel: bitsPerComponent,
+            bytesPerRow: width,
+            space: CGColorSpace(name: CGColorSpace.genericGrayGamma2_2)!,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+            )
     }
 }
+

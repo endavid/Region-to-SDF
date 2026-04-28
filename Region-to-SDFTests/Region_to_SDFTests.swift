@@ -73,7 +73,7 @@ struct Region_to_SDFTests {
         }
         
         let sampler = ImageSampler(image: image)
-        let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor)
+        let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor, epsilon: 5.0/255.0, grow: false)
         #expect(regionalSDF.isInside(testCoord))
         #expect(!regionalSDF.isInside((0, 0)))
         try regionalSDF.computeSDF() { iteration in
@@ -141,7 +141,7 @@ struct Region_to_SDFTests {
             return
         }
         let sampler = ImageSampler(image: image)
-        let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor)
+        let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor, epsilon: 5.0 / 255.0, grow: false)
         let contour = regionalSDF.extractBoundaryContour()
         #expect(contour.count == expectedCount)
         var img = SimpleImage<Int>(width: regionalSDF.width, height: regionalSDF.height, repeating: 0)
@@ -210,6 +210,57 @@ struct Region_to_SDFTests {
             saveImage(cgImage, path: "exteriorBoundingMaps_test_0x\(regionColor.hexString)_closest_uv.png")
         }
     }
+    
+    @Test(
+        "Circular Harmonics",
+        arguments: [
+            // at least one of the arguments needs to be hashable for identification, so I use Int for the color
+            (hexColor: 0xf7c164, expected0a0: 0.8001529, expMinValue: -1.6166525, expMaxValue: 4.153237),
+            (hexColor: 0x2f8fec, expected0a0: 0.533785, expMinValue: -1.6091427, expMaxValue: 4.3262334)
+        ]
+    )
+    func circularHarmonicsTest(hexColor: Int, expected0a0: Float, expMinValue: Float, expMaxValue: Float) throws {
+        let regionColor = ColorRGB(hexValue: hexColor)
+        let testBundle = Bundle(for: SelfClass.self)
+        guard let url = testBundle.url(forResource: "RegionTest32x32", withExtension: "png") else {
+            Issue.record("Missing test image RegionTest32x32.png in test bundle")
+            return
+        }
+        guard let image = NSImage(contentsOf: url) else {
+            Issue.record("Failed to load NSImage from \(url)")
+            return
+        }
+        let sampler = ImageSampler(image: image)
+        let regionalSDF = RegionalSDF(sampler: sampler, regionColor: regionColor)
+        try regionalSDF.computeSDF()
+        let density = regionalSDF.computeNormalizedDensity()
+        if let cgImage = density.toCGImage() {
+            saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_density.png")
+        }
+        let densityField = regionalSDF.computeDensityField(ftOrder: 3)
+        let maxValue = densityField.maxValue()
+        let minValue = densityField.minValue()
+        #expect(IsClose(maxValue, expMaxValue))
+        #expect(IsClose(minValue, expMinValue))
+        #expect(IsClose(densityField.data[0].a[0], expected0a0))
+        let upwardsDensity = densityField.evaluate(direction: SIMD2(x: 0, y: 1)).normalize()
+        let downwardsDensity = densityField.evaluate(direction: SIMD2(x: 0, y: -1)).normalize()
+        let leftwardsDensity = densityField.evaluate(direction: SIMD2(x: -1, y: 0)).normalize()
+        let rightwardsDensity = densityField.evaluate(direction: SIMD2(x: 1, y: 0)).normalize()
+        if let cgImage = upwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_upwards.png")
+        }
+        if let cgImage = downwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_downwards.png")
+        }
+        if let cgImage = leftwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_leftwards.png")
+        }
+        if let cgImage = rightwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_rightwards.png")
+        }
+    }
+    
 
     // Helper to get the test bundle via class lookup
     private final class SelfClass {}
