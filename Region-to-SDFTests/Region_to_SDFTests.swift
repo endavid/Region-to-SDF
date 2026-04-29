@@ -216,7 +216,7 @@ struct Region_to_SDFTests {
         arguments: [
             // at least one of the arguments needs to be hashable for identification, so I use Int for the color
             (hexColor: 0xf7c164, expected0a0: 0.8001529, expMinValue: -1.6166525, expMaxValue: 4.153237),
-            (hexColor: 0x2f8fec, expected0a0: 0.533785, expMinValue: -1.6091427, expMaxValue: 4.3262334)
+            (hexColor: 0x2f8fec, expected0a0: 0.533785, expMinValue: -1.4623079, expMaxValue: 4.3262334)
         ]
     )
     func circularHarmonicsTest(hexColor: Int, expected0a0: Float, expMinValue: Float, expMaxValue: Float) throws {
@@ -237,7 +237,7 @@ struct Region_to_SDFTests {
         if let cgImage = density.toCGImage() {
             saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_density.png")
         }
-        let densityField = regionalSDF.computeDensityField(ftOrder: 3)
+        let densityField = regionalSDF.computeDensityField(ftOrder: 12)
         let maxValue = densityField.maxValue()
         let minValue = densityField.minValue()
         #expect(IsClose(maxValue, expMaxValue))
@@ -247,8 +247,8 @@ struct Region_to_SDFTests {
         let rangesB = densityField.rangesB()
         print(rangesA)
         print(rangesB)
-        let upwardsDensity = densityField.evaluate(direction: SIMD2(x: 0, y: 1)).normalize()
-        let downwardsDensity = densityField.evaluate(direction: SIMD2(x: 0, y: -1)).normalize()
+        let upwardsDensity = densityField.evaluate(direction: SIMD2(x: 0, y: -1)).normalize()
+        let downwardsDensity = densityField.evaluate(direction: SIMD2(x: 0, y: 1)).normalize()
         let leftwardsDensity = densityField.evaluate(direction: SIMD2(x: -1, y: 0)).normalize()
         let rightwardsDensity = densityField.evaluate(direction: SIMD2(x: 1, y: 0)).normalize()
         if let cgImage = upwardsDensity.toCGImage() {
@@ -265,6 +265,22 @@ struct Region_to_SDFTests {
         }
         if let cgImage = densityField.toCGImage() {
             saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_ftDensityField.png")
+        }
+        let realUpwardsDensity = regionalSDF.computeDensity(direction: SIMD2(x: 0, y: -1)).normalize()
+        let realDownwardsDensity = regionalSDF.computeDensity(direction: SIMD2(x: 0, y: 1)).normalize()
+        let realLeftwardsDensity = regionalSDF.computeDensity(direction: SIMD2(x: -1, y: 0)).normalize()
+        let realRightwardsDensity = regionalSDF.computeDensity(direction: SIMD2(x: 1, y: 0)).normalize()
+        if let cgImage = realUpwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_upwards_truth.png")
+        }
+        if let cgImage = realDownwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_downwards_truth.png")
+        }
+        if let cgImage = realLeftwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_leftwards_truth.png")
+        }
+        if let cgImage = realRightwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "circularHarmonicsTest_0x\(regionColor.hexString)_rightwards_truth.png")
         }
     }
     

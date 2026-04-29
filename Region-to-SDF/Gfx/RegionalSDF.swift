@@ -630,14 +630,67 @@ class RegionalSDF {
                     let theta = dirs[i].angle
                     let value = integrals[i]
                     real += value * cosf(Float(k) * theta)
-                    imag += -value * sinf(Float(k) * theta)
+                    imag += value * sinf(Float(k) * theta)
                 }
                 // normalize by number of samples
                 real /= Float(dirCount)
                 imag /= Float(dirCount)
                 ch.setCoefficient(k: k, real: real, imag: imag)
             }
+            // store the density as well, since b[0] is always zero, so useless otherwise
+            ch.b[0] = densityImg.data[idx]
             return ch
+        }
+
+        return out
+    }
+    
+    /// This is useful for comparing the evaluation of CircularHarmonics in a particular direction vs the ground truth
+    func computeDensity(direction: SIMD2<Float>) -> SimpleImage<Float> {
+        let densityImg = computeNormalizedDensity()
+        let w = width
+        let h = height
+        let hyp = Float(sqrt(Double(w * w + h * h)))
+        var out = SimpleImage<Float>(width: w, height: h, repeating: 0)
+
+        // Bilinear sampling helper over densityImg.data (float values) in image coordinates
+        func sampleBilinear(_ x: Float, _ y: Float) -> Float {
+            if x < 0 || y < 0 || x > Float(w - 1) || y > Float(h - 1) { return 0 }
+            let x0 = Int(floorf(x))
+            let y0 = Int(floorf(y))
+            let x1 = min(x0 + 1, w - 1)
+            let y1 = min(y0 + 1, h - 1)
+            let tx = x - Float(x0)
+            let ty = y - Float(y0)
+            let v00 = densityImg.getValue((x0, y0))
+            let v10 = densityImg.getValue((x1, y0))
+            let v01 = densityImg.getValue((x0, y1))
+            let v11 = densityImg.getValue((x1, y1))
+            let a = v00 * (1 - tx) + v10 * tx
+            let b = v01 * (1 - tx) + v11 * tx
+            return a * (1 - ty) + b * ty
+        }
+
+        // Ray-march parameters
+        let step: Float = 1.0 // pixel step
+        let maxRadius: Float = hyp
+
+        // For each pixel, integrate along 32 directions and compute angular DFT
+        out.setAll { idx, coord in
+            let cx = Float(coord.x)
+            let cy = Float(coord.y)
+
+            var t: Float = 0
+            var sum: Float = 0
+            while t <= maxRadius {
+                let sx = cx + direction.x * t
+                let sy = cy + direction.y * t
+                if sx < 0 || sy < 0 || sx >= Float(w) || sy >= Float(h) { break }
+                sum += sampleBilinear(sx, sy)
+                t += step
+            }
+            
+            return sum
         }
 
         return out
@@ -829,11 +882,14 @@ extension SimpleImage where T == CircularHarmonics {
         let pixelCount = w2 * height
         var buffer = [UInt16].init(repeating: 0, count: pixelCount * bytesPerPixel)
         
-        // normalize assuming not any coefficient will be greater than a quarter of the width
-        let Lmax = Float(width / 4)
+        // normalize with the max coefficient
+        let Lmax = maxValue()
         func toUInt16(_ v: Float) -> UInt16 {
-            let scaled = Clamp(round(65535.0 * (0.5 * v / Lmax + 0.5)), low: 0.0, high: 65535.0)
+            let scaled = Clamp(round(65535.0 * v), low: 0.0, high: 65535.0)
             return UInt16(scaled)
+        }
+        func toUInt16Scaled(_ v: Float) -> UInt16 {
+            return toUInt16((0.5 * v / Lmax + 0.5))
         }
         
         guard let f = data.first else {
@@ -848,14 +904,14 @@ extension SimpleImage where T == CircularHarmonics {
                 let i = index((x,y))
                 let c = data[i]
                 let j = w2 * y + x
-                buffer[j * 4] = toUInt16(c.a[0])
-                buffer[j * 4 + 1] = toUInt16(c.a[1])
-                buffer[j * 4 + 2] = toUInt16(c.a[2])
-                buffer[j * 4 + 3] = toUInt16(c.a[3])
-                buffer[(j + width) * 4] = toUInt16(c.b[0])
-                buffer[(j + width) * 4 + 1] = toUInt16(c.b[1])
-                buffer[(j + width) * 4 + 2] = toUInt16(c.b[2])
-                buffer[(j + width) * 4 + 3] = toUInt16(c.b[3])
+                buffer[j * 4] = toUInt16Scaled(c.a[0])
+                buffer[j * 4 + 1] = toUInt16Scaled(c.a[1])
+                buffer[j * 4 + 2] = toUInt16Scaled(c.a[2])
+                buffer[j * 4 + 3] = toUInt16Scaled(c.a[3])
+                buffer[(j + width) * 4] = toUInt16(c.b[0]) // b[0] contains the normalized density, don't scale
+                buffer[(j + width) * 4 + 1] = toUInt16Scaled(c.b[1])
+                buffer[(j + width) * 4 + 2] = toUInt16Scaled(c.b[2])
+                buffer[(j + width) * 4 + 3] = toUInt16Scaled(c.b[3])
             }
         }
         guard let provider = CGDataProvider(data: NSData(bytes: &buffer, length: pixelCount * bytesPerPixel * MemoryLayout<UInt16>.size)) else {
