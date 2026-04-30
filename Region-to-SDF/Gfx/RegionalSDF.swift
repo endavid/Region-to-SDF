@@ -435,7 +435,8 @@ class RegionalSDF {
                             let rIndex = inside.index(contour[bestRightIdx])
                             fovMap.setValue((parentIdx, rIndex, inside.index(b)), at: p)
                             if let cgImage = createFoVDebugImage(coord: p, fovMap: fovMap, boundary: contour) {
-                                let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_R_\(k).png")
+                                let sk = String(format: "%04d", k)
+                                let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_R_\(sk).png")
                                 CGImageWriteToFile(cgImage, filename: outputURL)
                                 logDebug("🕸️ computeFoV: saved \(outputURL.lastPathComponent)")
                             }
@@ -460,7 +461,8 @@ class RegionalSDF {
                             let lIndex = inside.index(contour[bestLeftIdx])
                             fovMap.setValue((lIndex, parentIdx, inside.index(b)), at: p)
                             if let cgImage = createFoVDebugImage(coord: p, fovMap: fovMap, boundary: contour) {
-                                let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_L_\(k).png")
+                                let sk = String(format: "%04d", k)
+                                let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_L_\(sk).png")
                                 CGImageWriteToFile(cgImage, filename: outputURL)
                                 logDebug("🕸️ computeFoV: saved \(outputURL.lastPathComponent)")
                             }
@@ -506,7 +508,8 @@ class RegionalSDF {
                             let mIndex = inside.index(midPoint)
                             fovMap.setValue((lIndex, rIndex, mIndex), at: p)
                             if let cgImage = createFoVDebugImage(coord: p, fovMap: fovMap, boundary: boundaryPiece) {
-                                let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_M_\(i).png")
+                                let si = String(format: "%04d", i)
+                                let outputURL = URL(fileURLWithPath: "\(path.path())_\(p.x)_\(p.y)_M_\(si).png")
                                 CGImageWriteToFile(cgImage, filename: outputURL)
                                 logDebug("🕸️ computeFoV: saved \(outputURL.lastPathComponent)")
                             }

@@ -85,7 +85,8 @@ struct Region_to_SDFTests {
                 print("Failed to get image for iteration \(iteration)")
                 return
             }
-            saveImage(cgImage, path: "regionalSDF_test_\(regionColor.hexString)_\(iteration).png")
+            let si = String(format: "%06d", iteration)
+            saveImage(cgImage, path: "regionalSDF_test_\(regionColor.hexString)_\(si).png")
         }
         let sdf = regionalSDF.getSDF()
         let euclideanSdf = regionalSDF.getEuclideanSDF()
@@ -149,7 +150,8 @@ struct Region_to_SDFTests {
         for i in 0..<contour.count {
             img.setValue(i+1, at: contour[i])
             if let cgImage = img.toCGImage(palette: palette) {
-                saveImage(cgImage, path: "boundaryContour_test_0x\(regionColor.hexString)_\(i).png")
+                let si = String(format: "%06d", i)
+                saveImage(cgImage, path: "boundaryContour_test_0x\(regionColor.hexString)_\(si).png")
             }
         }
         let thickBoundary = regionalSDF.buildBoundaryIndexMap(contour: contour)

@@ -11,7 +11,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 
 enum DistanceFunction: String, CaseIterable, Identifiable {
-    case SignedGray, SignedRedGreen, FieldOfView
+    case SignedGray, SignedRedGreen, FieldOfView, DensityFT
     var id: Self { self }
 }
 
@@ -341,6 +341,10 @@ struct ContentView: View {
             let fcdf = rdf.computeAngularDistanceField(fovMap: fovMap)
             let img = RegionalSDF.fcdfToRGBAImage(fcdf)
             return (rdf, img.toCGImage())
+        }
+        if selectedDF == .DensityFT {
+            let df = rdf.computeDensityField()
+            return (rdf, df.toCGImage())
         }
         let sdf = rdf.getEuclideanSDF()
         if selectedDF == .SignedRedGreen {
