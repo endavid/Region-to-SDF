@@ -341,6 +341,9 @@ struct Region_to_SDFTests {
         if let cgImage = densityField.toCGImage() {
             saveImage(cgImage, path: "multiregionalDF_df_FT.png")
         }
+        if let cgImage = multiregionalDF.distanceAndRegionIdToRGImage().toCGImage() {
+            saveImage(cgImage, path: "multiregionalDF_df_regions.png")
+        }
     }
 
     // Helper to get the test bundle via class lookup

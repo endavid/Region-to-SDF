@@ -264,5 +264,21 @@ class MultiRegionalDF {
         }
         return img
     }
+    
+    func distanceAndRegionIdToRGImage() -> SimpleImage<UInt32> {
+        let w = width
+        let h = height
+        var img = SimpleImage<UInt32>(width: w, height: h, repeating: 0)
+        // hypotenuse
+        let maxDistance = Float(w)
+        img.setAllParallel { i, _ in
+            let d = Clamp(distances.data[i] / maxDistance, low: 0.0, high: 1.0)
+            let r = UInt32(roundf(255.0 * d))
+            let g = UInt32(regions.data[i])
+            return UInt32(r << 24 | g << 16 | 0x00ff)
+
+        }
+        return img
+    }
 
 }
