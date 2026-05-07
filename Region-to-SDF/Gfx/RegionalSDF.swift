@@ -128,41 +128,9 @@ class RegionalSDF {
         }
 
         // 2) Multi-source Dijkstra
-        struct Node { let d: Float; let x: Int; let y: Int }
-        // Simple binary heap
-        var heap: [Node] = []
-        func heapPush(_ node: Node) {
-            heap.append(node)
-            var i = heap.count - 1
-            while i > 0 {
-                let p = (i - 1) >> 1
-                if heap[p].d <= heap[i].d { break }
-                heap.swapAt(p, i)
-                i = p
-            }
-        }
-        func heapPop() -> Node? {
-            guard !heap.isEmpty else { return nil }
-            let res = heap[0]
-            let last = heap.removeLast()
-            if !heap.isEmpty {
-                heap[0] = last
-                var i = 0
-                while true {
-                    let l = i * 2 + 1
-                    let r = l + 1
-                    var m = i
-                    if l < heap.count && heap[l].d < heap[m].d { m = l }
-                    if r < heap.count && heap[r].d < heap[m].d { m = r }
-                    if m == i { break }
-                    heap.swapAt(i, m)
-                    i = m
-                }
-            }
-            return res
-        }
+        var dijkstra = Dijkstra()
 
-        for c in frontier { heapPush(Node(d: 0, x: c.x, y: c.y)) }
+        for c in frontier { dijkstra.heapPush(Dijkstra.Node(d: 0, x: c.x, y: c.y)) }
 
         let neighbors: [(dx:Int, dy:Int, cost: Float)] = [
             (-1, 0, 1), (1, 0, 1), (0, -1, 1), (0, 1, 1),
@@ -170,7 +138,7 @@ class RegionalSDF {
         ]
 
         var popped = 0
-        while let node = heapPop() {
+        while let node = dijkstra.heapPop() {
             popped += 1
             let c = (node.x, node.y)
             if node.d > distances.getValue(c) { continue } // stale
@@ -188,7 +156,7 @@ class RegionalSDF {
                     } else {
                         closestParent.setValue(closestParent.index(c), at: q)
                     }
-                    heapPush(Node(d: nd, x: nx, y: ny))
+                    dijkstra.heapPush(Dijkstra.Node(d: nd, x: nx, y: ny))
                 }
             }
             if let fn = debugIterationFn { fn(popped) }

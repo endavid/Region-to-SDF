@@ -286,7 +286,7 @@ struct Region_to_SDFTests {
         }
     }
     
-    @Test func multiregionalSDF() {
+    @Test func multiregionalDF() throws {
         let testBundle = Bundle(for: SelfClass.self)
         guard let url = testBundle.url(forResource: "RegionTest32x32", withExtension: "png") else {
             Issue.record("Missing test image RegionTest32x32.png in test bundle")
@@ -298,9 +298,21 @@ struct Region_to_SDFTests {
         }
         let sampler = ImageSampler(image: image)
         let palette = [ColorRGB(hexValue: 0x130c14), ColorRGB(hexValue: 0xf7c164), ColorRGB(hexValue: 0x2f8fec), ColorRGB(hexValue: 0x805710), ColorRGB(hexValue: 0xd8ea35), ColorRGB(hexValue: 0xb8274d), ColorRGB(hexValue: 0xb8274d), ColorRGB(hexValue: 0x0aa80e), ColorRGB(hexValue: 0xcd10de)]
-        let multiregionalSDF = MultiRegionalSDF(sampler: sampler, regionColors: palette)
-        if let cgImage = multiregionalSDF.regions.toCGImage(palette: palette) {
-            saveImage(cgImage, path: "multiregionalSDF_regions.png")
+        let multiregionalDF = MultiRegionalDF(sampler: sampler, regionColors: palette)
+        if let cgImage = multiregionalDF.regions.toCGImage(palette: palette) {
+            saveImage(cgImage, path: "multiregionalDF_regions.png")
+        }
+        try multiregionalDF.computeDF() { iteration in
+            if iteration > 10 && (iteration % 25 != 0) {
+                // skip some
+                return
+            }
+            guard let cgImage = multiregionalDF.distancesToGrayImage().toCGImage() else {
+                print("Failed to get image for iteration \(iteration)")
+                return
+            }
+            let si = String(format: "%06d", iteration)
+            saveImage(cgImage, path: "multiregionalDF_df_\(si).png")
         }
     }
 
