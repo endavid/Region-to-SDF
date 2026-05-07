@@ -286,6 +286,23 @@ struct Region_to_SDFTests {
         }
     }
     
+    @Test func multiregionalSDF() {
+        let testBundle = Bundle(for: SelfClass.self)
+        guard let url = testBundle.url(forResource: "RegionTest32x32", withExtension: "png") else {
+            Issue.record("Missing test image RegionTest32x32.png in test bundle")
+            return
+        }
+        guard let image = NSImage(contentsOf: url) else {
+            Issue.record("Failed to load NSImage from \(url)")
+            return
+        }
+        let sampler = ImageSampler(image: image)
+        let palette = [ColorRGB(hexValue: 0x130c14), ColorRGB(hexValue: 0xf7c164), ColorRGB(hexValue: 0x2f8fec), ColorRGB(hexValue: 0x805710), ColorRGB(hexValue: 0xd8ea35), ColorRGB(hexValue: 0xb8274d), ColorRGB(hexValue: 0xb8274d), ColorRGB(hexValue: 0x0aa80e), ColorRGB(hexValue: 0xcd10de)]
+        let multiregionalSDF = MultiRegionalSDF(sampler: sampler, regionColors: palette)
+        if let cgImage = multiregionalSDF.regions.toCGImage(palette: palette) {
+            saveImage(cgImage, path: "multiregionalSDF_regions.png")
+        }
+    }
 
     // Helper to get the test bundle via class lookup
     private final class SelfClass {}

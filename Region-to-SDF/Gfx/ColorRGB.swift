@@ -94,6 +94,12 @@ struct ColorRGB {
         }
     }
     
+    var hex: UInt32 {
+        get {
+            return (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
+        }
+    }
+    
     init(r: UInt8, g: UInt8, b: UInt8) {
         self.r = r
         self.g = g
