@@ -317,6 +317,30 @@ struct Region_to_SDFTests {
         if let cgImage = multiregionalDF.densityToGrayImage().toCGImage() {
             saveImage(cgImage, path: "multiregionalDF_df_density.png")
         }
+        let densityField = multiregionalDF.computeDensityField(ftOrder: 4)
+        let maxValue = densityField.maxValue()
+        let minValue = densityField.minValue()
+        #expect(IsClose(maxValue, 4.7866592))
+        #expect(IsClose(minValue, -1.6761558))
+        let upwardsDensity = densityField.evaluate(direction: SIMD2(x: 0, y: -1)).normalize()
+        let downwardsDensity = densityField.evaluate(direction: SIMD2(x: 0, y: 1)).normalize()
+        let leftwardsDensity = densityField.evaluate(direction: SIMD2(x: -1, y: 0)).normalize()
+        let rightwardsDensity = densityField.evaluate(direction: SIMD2(x: 1, y: 0)).normalize()
+        if let cgImage = upwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "multiregionalDF_df_upwards.png")
+        }
+        if let cgImage = downwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "multiregionalDF_df_downwards.png")
+        }
+        if let cgImage = leftwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "multiregionalDF_df_leftwards.png")
+        }
+        if let cgImage = rightwardsDensity.toCGImage() {
+            saveImage(cgImage, path: "multiregionalDF_df_rightwards.png")
+        }
+        if let cgImage = densityField.toCGImage() {
+            saveImage(cgImage, path: "multiregionalDF_df_FT.png")
+        }
     }
 
     // Helper to get the test bundle via class lookup

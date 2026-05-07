@@ -128,7 +128,7 @@ class RegionalSDF {
         }
 
         // 2) Multi-source Dijkstra
-        var dijkstra = Dijkstra()
+        let dijkstra = Dijkstra()
 
         for c in frontier { dijkstra.heapPush(Dijkstra.Node(d: 0, x: c.x, y: c.y)) }
 
@@ -549,24 +549,6 @@ class RegionalSDF {
             dirs.append((cosf(theta), sinf(theta), theta))
         }
 
-        // Bilinear sampling helper over densityImg.data (float values) in image coordinates
-        func sampleBilinear(_ x: Float, _ y: Float) -> Float {
-            if x < 0 || y < 0 || x > Float(w - 1) || y > Float(h - 1) { return 0 }
-            let x0 = Int(floorf(x))
-            let y0 = Int(floorf(y))
-            let x1 = min(x0 + 1, w - 1)
-            let y1 = min(y0 + 1, h - 1)
-            let tx = x - Float(x0)
-            let ty = y - Float(y0)
-            let v00 = densityImg.getValue((x0, y0))
-            let v10 = densityImg.getValue((x1, y0))
-            let v01 = densityImg.getValue((x0, y1))
-            let v11 = densityImg.getValue((x1, y1))
-            let a = v00 * (1 - tx) + v10 * tx
-            let b = v01 * (1 - tx) + v11 * tx
-            return a * (1 - ty) + b * ty
-        }
-
         // Ray-march parameters
         let step: Float = 1.0 // pixel step
         let maxRadius: Float = hyp
@@ -585,7 +567,7 @@ class RegionalSDF {
                     let sx = cx + d.dx * t
                     let sy = cy + d.dy * t
                     if sx < 0 || sy < 0 || sx >= Float(w) || sy >= Float(h) { break }
-                    sum += sampleBilinear(sx, sy)
+                    sum += densityImg.sampleBilinear(sx, sy)
                     t += step
                 }
                 integrals[i] = sum
@@ -837,7 +819,7 @@ extension SimpleImage where T == CircularHarmonics {
     /// Evaluates the density for a given direction
     func evaluate(direction: SIMD2<Float>) -> SimpleImage<Float> {
         var out = SimpleImage<Float>(width: width, height: height, repeating: 0)
-        out.setAll() { i, _ in
+        out.setAllParallel() { i, _ in
             data[i].evaluate(direction: direction)
         }
         return out

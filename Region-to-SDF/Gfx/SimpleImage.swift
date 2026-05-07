@@ -271,6 +271,23 @@ extension SimpleImage where T == Float {
         return out
     }
     
+    func sampleBilinear(_ x: Float, _ y: Float) -> Float {
+        if x < 0 || y < 0 || x > Float(width - 1) || y > Float(height - 1) { return 0 }
+        let x0 = Int(floorf(x))
+        let y0 = Int(floorf(y))
+        let x1 = min(x0 + 1, width - 1)
+        let y1 = min(y0 + 1, height - 1)
+        let tx = x - Float(x0)
+        let ty = y - Float(y0)
+        let v00 = getValue((x0, y0))
+        let v10 = getValue((x1, y0))
+        let v01 = getValue((x0, y1))
+        let v11 = getValue((x1, y1))
+        let a = v00 * (1 - tx) + v10 * tx
+        let b = v01 * (1 - tx) + v11 * tx
+        return a * (1 - ty) + b * ty
+    }
+    
     func toCGImage() -> CGImage? {
         let pixelCount = width * height
         let bitsPerComponent = 8

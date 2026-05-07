@@ -135,6 +135,92 @@ class MultiRegionalDF {
             return distances.data[i] / maxD
         }
     }
+    
+    func computeDensityField(ftOrder: Int = 4) -> SimpleImage<CircularHarmonics> {
+        let w = width
+        let h = height
+        let hyp = Float(sqrt(Double(w * w + h * h)))
+        // Output image of CircularHarmonics
+        let chTemplate = CircularHarmonics(order: ftOrder)
+        var out = SimpleImage<CircularHarmonics>(width: w, height: h, repeating: chTemplate)
+
+        // Precompute 32 directions
+        let dirCount = 32
+        let twoPi = Float.pi * 2
+        var dirs: [(dx: Float, dy: Float, angle: Float)] = []
+        dirs.reserveCapacity(dirCount)
+        for i in 0..<dirCount {
+            let theta = (twoPi * Float(i)) / Float(dirCount)
+            dirs.append((cosf(theta), sinf(theta), theta))
+        }
+        
+        // bilinear sampling with region masking
+        func sampleBilinear(_ x: Float, _ y: Float, region: Int) -> Float {
+            if x < 0 || y < 0 || x > Float(width - 1) || y > Float(height - 1) { return 0 }
+            let x0 = Int(floorf(x))
+            let y0 = Int(floorf(y))
+            let x1 = min(x0 + 1, width - 1)
+            let y1 = min(y0 + 1, height - 1)
+            let tx = x - Float(x0)
+            let ty = y - Float(y0)
+            let v00 = regions.getValue((x0,y0)) == region ? density.getValue((x0, y0)) : 0
+            let v10 = regions.getValue((x1, y0)) == region ? density.getValue((x1, y0)) : 0
+            let v01 = regions.getValue((x0, y1)) == region ? density.getValue((x0, y1)) : 0
+            let v11 = regions.getValue((x1, y1)) == region ? density.getValue((x1, y1)) : 0
+            let a = v00 * (1 - tx) + v10 * tx
+            let b = v01 * (1 - tx) + v11 * tx
+            return a * (1 - ty) + b * ty
+        }
+
+        // Ray-march parameters
+        let step: Float = 1.0 // pixel step
+        let maxRadius: Float = hyp
+
+        // For each pixel, integrate along 32 directions and compute angular DFT
+        out.setAll { idx, coord in
+            let r = regions.data[idx]
+            let cx = Float(coord.x)
+            let cy = Float(coord.y)
+
+            // Accumulate per-direction integrals
+            var integrals = [Float](repeating: 0, count: dirCount)
+            for (i, d) in dirs.enumerated() {
+                var t: Float = 0
+                var sum: Float = 0
+                while t <= maxRadius {
+                    let sx = cx + d.dx * t
+                    let sy = cy + d.dy * t
+                    if sx < 0 || sy < 0 || sx >= Float(w) || sy >= Float(h) { break }
+                    sum += sampleBilinear(sx, sy, region: r)
+                    t += step
+                }
+                integrals[i] = sum
+            }
+
+            // Compute DFT coefficients up to `defaultOrder`
+            var ch = CircularHarmonics(order: ftOrder)
+            // k = 0..order (assuming DC plus harmonics)
+            for k in 0...ftOrder {
+                var real: Float = 0
+                var imag: Float = 0
+                for i in 0..<dirCount {
+                    let theta = dirs[i].angle
+                    let value = integrals[i]
+                    real += value * cosf(Float(k) * theta)
+                    imag += value * sinf(Float(k) * theta)
+                }
+                // normalize by number of samples
+                real /= Float(dirCount)
+                imag /= Float(dirCount)
+                ch.setCoefficient(k: k, real: real, imag: imag)
+            }
+            // store the density as well, since b[0] is always zero, so useless otherwise
+            ch.b[0] = density.data[idx]
+            return ch
+        }
+
+        return out
+    }
 
     func distancesToGrayImage() -> SimpleImage<UInt8> {
         let w = distances.width
