@@ -42,21 +42,17 @@ struct SimpleImage<T> {
         }
     }
     mutating func setAllParallel(_ fn: (Int, Coord2D)->T) {
-        // Compute into a separate buffer to avoid data races, then assign.
-        // Work is split by rows so each worker writes to a disjoint slice.
-        var newData = data
-        if newData.count != width * height {
-            newData = [T](repeating: data.first ?? { fatalError("SimpleImage.setAllParallel requires non-empty data or a default value") }(), count: width * height)
-        }
-        DispatchQueue.concurrentPerform(iterations: height) { y in
-            let start = y * width
-            let end = start + width
-            var i = start
-            var x = 0
-            while i < end {
-                newData[i] = fn(i, (x, y))
-                i += 1
-                x += 1
+        let newData: [T] = .init(unsafeUninitializedCapacity: width * height) { buffer, initializedCount in
+            initializedCount = width * height
+            DispatchQueue.concurrentPerform(iterations: height) { y in
+                let start = y * width
+                var i = start
+                var x = 0
+                while x < width {
+                    buffer[i] = fn(i, (x, y))
+                    i += 1
+                    x += 1
+                }
             }
         }
         data = newData

@@ -11,6 +11,7 @@ class MultiRegionalDF {
     let regionCount: Int
     var regions: SimpleImage<Int>
     private var distances: SimpleImage<Float>
+    private var density: SimpleImage<Float>
     private var closestParent: SimpleImage<Coord2D>
     private var maxDistancePerRegion: [Float]
     
@@ -31,7 +32,7 @@ class MultiRegionalDF {
         let h = sampler.height
         regionCount = regionColors.count
         regions = SimpleImage<Int>(width: w, height: h, repeating: 0)
-        regions.setAll { i, coord in
+        regions.setAllParallel { i, coord in
             let s: UintColorTuple = sampler.get(coord: coord)
             let color = ColorRGB(s)
             let colorsSorted = regionColors.sorted { Diff2($0, color) < Diff2($1, color) }
@@ -45,6 +46,7 @@ class MultiRegionalDF {
             return index
         }
         distances = SimpleImage<Float>(width: w, height: h, repeating: RegionalSDF.BigValue)
+        density = SimpleImage<Float>(width: w, height: h, repeating: 0)
         closestParent = SimpleImage<Coord2D>(width: w, height: h, repeating: (-1,-1))
         maxDistancePerRegion = [Float].init(repeating: 0, count: regionCount)
     }
@@ -59,7 +61,7 @@ class MultiRegionalDF {
         ]
         
         // 1) Init boundary pixels (any pixel that has a neighbor of a different region)
-        distances.setAll { i, coord in
+        distances.setAllParallel { i, coord in
             var minDist = INF
             let r = regions.data[i]
             for n in neighbors {
@@ -127,12 +129,11 @@ class MultiRegionalDF {
         }
         
         // normalize. The normalized DF corresponds to density with linear falloff
-        for i in 0..<distances.data.count {
+        density.setAllParallel { i, _ in
             let r = regions.data[i]
             let maxD = maxDistancePerRegion[r]
-            distances.data[i] = distances.data[i] / maxD
+            return distances.data[i] / maxD
         }
-
     }
 
     func distancesToGrayImage() -> SimpleImage<UInt8> {
@@ -149,10 +150,10 @@ class MultiRegionalDF {
         }
         return img
     }
-    
-    func normalizedDistancesToGrayImage() -> SimpleImage<UInt8> {
+        
+    func densityToGrayImage() -> SimpleImage<UInt8> {
         var img = SimpleImage<UInt8>(width: width, height: height, repeating: 0)
-        img.data = distances.data.map { value in
+        img.data = density.data.map { value in
             let u = Clamp(value, low: 0, high: 1)
             return UInt8(roundf(255.0 * u))
         }
