@@ -8,9 +8,11 @@
 import Foundation
 
 class MultiRegionalDF {
+    let regionCount: Int
     var regions: SimpleImage<Int>
     private var distances: SimpleImage<Float>
     private var closestParent: SimpleImage<Coord2D>
+    private var maxDistancePerRegion: [Float]
     
     var width: Int {
         get {
@@ -27,6 +29,7 @@ class MultiRegionalDF {
     init(sampler: ImageSampler, regionColors: Palette) {
         let w = sampler.width
         let h = sampler.height
+        regionCount = regionColors.count
         regions = SimpleImage<Int>(width: w, height: h, repeating: 0)
         regions.setAll { i, coord in
             let s: UintColorTuple = sampler.get(coord: coord)
@@ -43,6 +46,7 @@ class MultiRegionalDF {
         }
         distances = SimpleImage<Float>(width: w, height: h, repeating: RegionalSDF.BigValue)
         closestParent = SimpleImage<Coord2D>(width: w, height: h, repeating: (-1,-1))
+        maxDistancePerRegion = [Float].init(repeating: 0, count: regionCount)
     }
     
     func computeDF(debugIterationFn: ((Int)->())? = nil) throws {
@@ -83,7 +87,7 @@ class MultiRegionalDF {
         if let fn = debugIterationFn { fn(0) }
         
         // 2) Multi-source Dijkstra
-        var dijkstra = Dijkstra()
+        let dijkstra = Dijkstra()
         for y in 0..<height {
             for x in 0..<width {
                 let d = distances.getValue((x,y))
@@ -98,7 +102,6 @@ class MultiRegionalDF {
             popped += 1
             let c = (node.x, node.y)
             if node.d > distances.getValue(c) { continue } // stale
-            let parent = closestParent.getValue(c)
             for nb in neighbors {
                 let nx = node.x + nb.dx
                 let ny = node.y + nb.dy
@@ -114,6 +117,22 @@ class MultiRegionalDF {
             if let fn = debugIterationFn { fn(popped) }
         }
         
+        // 3) Remember max distance of each region and normalize each region separately
+        maxDistancePerRegion = [Float].init(repeating: 0, count: regionCount)
+        
+        for i in 0..<regions.data.count {
+            let r = regions.data[i]
+            let d = distances.data[i]
+            maxDistancePerRegion[r] = max(maxDistancePerRegion[r], d)
+        }
+        
+        // normalize. The normalized DF corresponds to density with linear falloff
+        for i in 0..<distances.data.count {
+            let r = regions.data[i]
+            let maxD = maxDistancePerRegion[r]
+            distances.data[i] = distances.data[i] / maxD
+        }
+
     }
 
     func distancesToGrayImage() -> SimpleImage<UInt8> {
@@ -130,4 +149,14 @@ class MultiRegionalDF {
         }
         return img
     }
+    
+    func normalizedDistancesToGrayImage() -> SimpleImage<UInt8> {
+        var img = SimpleImage<UInt8>(width: width, height: height, repeating: 0)
+        img.data = distances.data.map { value in
+            let u = Clamp(value, low: 0, high: 1)
+            return UInt8(roundf(255.0 * u))
+        }
+        return img
+    }
+
 }

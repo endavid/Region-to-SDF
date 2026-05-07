@@ -314,6 +314,9 @@ struct Region_to_SDFTests {
             let si = String(format: "%06d", iteration)
             saveImage(cgImage, path: "multiregionalDF_df_\(si).png")
         }
+        if let cgImage = multiregionalDF.normalizedDistancesToGrayImage().toCGImage() {
+            saveImage(cgImage, path: "multiregionalDF_df_normalized.png")
+        }
     }
 
     // Helper to get the test bundle via class lookup
