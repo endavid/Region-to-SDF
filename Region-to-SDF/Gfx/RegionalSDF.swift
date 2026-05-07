@@ -830,10 +830,8 @@ extension SimpleImage where T == CircularHarmonics {
         let channelCount = 4
         let bitsPerPixel = channelCount * bitsPerComponent
         let bytesPerPixel = bitsPerPixel / 8
-        // 2 * width: coeffs(a) to the left, coeffs(b) to the right
-        let w2 = 2 * width
-        let pixelCount = w2 * height
-        var buffer = [UInt16].init(repeating: 0, count: pixelCount * bytesPerPixel)
+        var imageWidth = width
+        var pixelCount = width * height
         
         // normalize with the max coefficient
         let Lmax = maxValue()
@@ -848,23 +846,46 @@ extension SimpleImage where T == CircularHarmonics {
         guard let f = data.first else {
             return nil
         }
-        if f.order < 3 {
-            Logger.shared.log("Minimum order supported is 3")
+        if f.order < 2 {
+            Logger.shared.log("Minimum order supported is 2")
             return nil
         }
-        for y in 0..<height {
-            for x in 0..<width {
-                let i = index((x,y))
-                let c = data[i]
-                let j = w2 * y + x
-                buffer[j * 4] = toUInt16Scaled(c.a[0])
-                buffer[j * 4 + 1] = toUInt16Scaled(c.a[1])
-                buffer[j * 4 + 2] = toUInt16Scaled(c.a[2])
-                buffer[j * 4 + 3] = toUInt16Scaled(c.a[3])
-                buffer[(j + width) * 4] = toUInt16(c.b[0]) // b[0] contains the normalized density, don't scale
-                buffer[(j + width) * 4 + 1] = toUInt16Scaled(c.b[1])
-                buffer[(j + width) * 4 + 2] = toUInt16Scaled(c.b[2])
-                buffer[(j + width) * 4 + 3] = toUInt16Scaled(c.b[3])
+        
+        var buffer: [UInt16]
+
+        if f.order < 3 {
+            buffer = [UInt16].init(repeating: 0, count: pixelCount * bytesPerPixel)
+            for y in 0..<height {
+                for x in 0..<width {
+                    let i = index((x,y))
+                    let c = data[i]
+                    let j = imageWidth * y + x
+                    buffer[j * 4] = toUInt16Scaled(c.a[0])
+                    buffer[j * 4 + 1] = toUInt16Scaled(c.a[1])
+                    buffer[j * 4 + 2] = toUInt16Scaled(c.b[1])
+                    buffer[j * 4 + 3] = toUInt16(c.b[0]) // b[0] contains the normalized density, don't scale
+                }
+            }
+        } else {
+            // 2 * width: coeffs(a) to the left, coeffs(b) to the right
+            imageWidth = 2 * width
+            pixelCount = imageWidth * height
+            buffer = [UInt16].init(repeating: 0, count: pixelCount * bytesPerPixel)
+            
+            for y in 0..<height {
+                for x in 0..<width {
+                    let i = index((x,y))
+                    let c = data[i]
+                    let j = imageWidth * y + x
+                    buffer[j * 4] = toUInt16Scaled(c.a[0])
+                    buffer[j * 4 + 1] = toUInt16Scaled(c.a[1])
+                    buffer[j * 4 + 2] = toUInt16Scaled(c.a[2])
+                    buffer[j * 4 + 3] = toUInt16Scaled(c.a[3])
+                    buffer[(j + width) * 4] = toUInt16(c.b[0]) // b[0] contains the normalized density, don't scale
+                    buffer[(j + width) * 4 + 1] = toUInt16Scaled(c.b[1])
+                    buffer[(j + width) * 4 + 2] = toUInt16Scaled(c.b[2])
+                    buffer[(j + width) * 4 + 3] = toUInt16Scaled(c.b[3])
+                }
             }
         }
         guard let provider = CGDataProvider(data: NSData(bytes: &buffer, length: pixelCount * bytesPerPixel * MemoryLayout<UInt16>.size)) else {
@@ -872,11 +893,11 @@ extension SimpleImage where T == CircularHarmonics {
         }
         let bitmapInfo:CGBitmapInfo = [.byteOrder16Little, CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue)]
         return CGImage(
-            width: w2,
+            width: imageWidth,
             height: height,
             bitsPerComponent: bitsPerComponent,
             bitsPerPixel: bitsPerPixel,
-            bytesPerRow: 2 * width * bytesPerPixel,
+            bytesPerRow: imageWidth * bytesPerPixel,
             space: CGColorSpace(name: CGColorSpace.linearSRGB)!,
             bitmapInfo: bitmapInfo,
             provider: provider,

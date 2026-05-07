@@ -177,7 +177,7 @@ class MultiRegionalDF {
         let maxRadius: Float = hyp
 
         // For each pixel, integrate along 32 directions and compute angular DFT
-        out.setAll { idx, coord in
+        out.setAllParallel { idx, coord in
             let r = regions.data[idx]
             let cx = Float(coord.x)
             let cy = Float(coord.y)
@@ -217,6 +217,25 @@ class MultiRegionalDF {
             // store the density as well, since b[0] is always zero, so useless otherwise
             ch.b[0] = density.data[idx]
             return ch
+        }
+        
+        // Get max coefficient of each region and normalize each region separately
+        var maxCoefficientPerRegion = [Float].init(repeating: 0, count: regionCount)
+        
+        for i in 0..<regions.data.count {
+            let r = regions.data[i]
+            let ch = out.data[i]
+            let maxCoeff = max(ch.a.max() ?? -Float.maxFloat, ch.b.max() ?? -Float.maxFloat)
+            maxCoefficientPerRegion[r] = max(maxCoefficientPerRegion[r], maxCoeff)
+        }
+        
+        for i in 0..<regions.data.count {
+            let r = regions.data[i]
+            let maxCoeff = maxCoefficientPerRegion[r]
+            var ch = out.data[i]
+            ch.a = ch.a.map { $0 / maxCoeff }
+            ch.b = ch.b.map { $0 / maxCoeff }
+            out.data[i] = ch
         }
 
         return out
