@@ -269,7 +269,7 @@ class MultiRegionalDF {
         let w = width
         let h = height
         var img = SimpleImage<UInt32>(width: w, height: h, repeating: 0)
-        // hypotenuse
+        // hypotenuse, sqrt(ww+hh), would be safer, but we'd lose more precision
         let maxDistance = Float(w)
         img.setAllParallel { i, _ in
             let d = Clamp(distances.data[i] / maxDistance, low: 0.0, high: 1.0)
@@ -279,6 +279,24 @@ class MultiRegionalDF {
 
         }
         return img
+    }
+    
+    func colorAndDistanceImage(palette: Palette) -> SimpleImage<UInt32> {
+        let w = width
+        let h = height
+        var img = SimpleImage<UInt32>(width: w, height: h, repeating: 0)
+        // hypotenuse, sqrt(ww+hh), would be safer, but we'd lose more precision
+        let maxDistance = Float(w)
+        img.setAllParallel { i, _ in
+            let d = Clamp(distances.data[i] / maxDistance, low: 0.0, high: 1.0)
+            let k = min(regions.data[i], palette.count - 1)
+            let color = palette[k].hex
+            let a = UInt32(roundf(255.0 * d))
+            let g = UInt32(regions.data[i])
+            return UInt32(color << 8 | a)
+        }
+        return img
+
     }
 
 }
