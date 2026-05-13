@@ -292,11 +292,25 @@ class MultiRegionalDF {
             let k = min(regions.data[i], palette.count - 1)
             let color = palette[k].hex
             let a = UInt32(roundf(255.0 * d))
-            let g = UInt32(regions.data[i])
             return UInt32(color << 8 | a)
         }
         return img
-
+    }
+    
+    func densityAndDistanceFieldImage() -> SimpleImage<UInt32> {
+        let w = width
+        let h = height
+        var img = SimpleImage<UInt32>(width: w, height: h, repeating: 0)
+        // hypotenuse, sqrt(ww+hh), would be safer, but we'd lose more precision
+        let maxDistance = Float(w)
+        img.setAllParallel { i, _ in
+            let df = Clamp(distances.data[i] / maxDistance, low: 0.0, high: 1.0)
+            let d = Clamp(density.data[i], low: 0, high: 1)
+            let r = UInt32(roundf(255.0 * d))
+            let g = UInt32(roundf(255.0 * df))
+            return UInt32(r << 24 | g << 16 | 0x00ff)
+        }
+        return img
     }
 
 }

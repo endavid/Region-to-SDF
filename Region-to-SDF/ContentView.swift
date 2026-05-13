@@ -11,7 +11,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 
 enum DistanceFunction: String, CaseIterable, Identifiable {
-    case SignedGray, SignedRedGreen, FieldOfView, DensityFT
+    case SignedGray, SignedRedGreen, FieldOfView, DensityFT, DensityDF
     var id: Self { self }
 }
 
@@ -26,7 +26,6 @@ struct ContentView: View {
     
     @State private var selectedDF: DistanceFunction = .FieldOfView
     
-    @State private var generatedSDFs: [RegionalSDF] = []
     @State private var generatedCGImages: [CGImage] = []
     
     @State private var maxColorDifference: Double = 5 // 0..128
@@ -291,7 +290,6 @@ struct ContentView: View {
     
     private func clear() {
         palette.removeAll()
-        generatedSDFs.removeAll()
         generatedCGImages.removeAll()
     }
 
@@ -333,29 +331,29 @@ struct ContentView: View {
     }
         
     // MARK: - SDF Batch Generation
-    private func makeSDF(for color: Color, sampler: ImageSampler, epsilon: Float) throws -> (RegionalSDF, CGImage?) {
+    private func makeSDF(for color: Color, sampler: ImageSampler, epsilon: Float) throws -> CGImage? {
         let rdf = RegionalSDF(sampler: sampler, regionColor: color.colorRGB, epsilon: epsilon)
         try rdf.computeSDF()
         if selectedDF == .FieldOfView {
             let fovMap = rdf.computeFoV()
             let fcdf = rdf.computeAngularDistanceField(fovMap: fovMap)
             let img = RegionalSDF.fcdfToRGBAImage(fcdf)
-            return (rdf, img.toCGImage())
+            return img.toCGImage()
         }
         if selectedDF == .DensityFT {
             let df = rdf.computeDensityField()
-            return (rdf, df.toCGImage())
+            return df.toCGImage()
         }
         let sdf = rdf.getEuclideanSDF()
         if selectedDF == .SignedRedGreen {
             let img = RegionalSDF.distanceToRGImage(sdf, maxContrast: true)
-            return (rdf, img.toCGImage())
+            return img.toCGImage()
         }
         if selectedDF == .SignedGray {
             let img = RegionalSDF.distanceToGrayImage(sdf)
-            return (rdf, img.toCGImage())
+            return img.toCGImage()
         }
-        return (rdf, nil)
+        return nil
     }
     
     private func exportGeneratedImages() {
@@ -415,7 +413,6 @@ struct ContentView: View {
 
     @MainActor
     private func resetGeneratedOutputs() {
-        generatedSDFs.removeAll()
         generatedCGImages.removeAll()
     }
 
@@ -424,66 +421,72 @@ struct ContentView: View {
         return Float(maxColorDifference) / 255.0
     }
 
-    private func computeAllSDFsSync() throws -> (sdfs: [RegionalSDF], images: [CGImage]) {
+    private func computeAllSDFsSync() throws -> [CGImage] {
         guard let imageSampler else { throw NSError(domain: "RegionToSDF", code: 1, userInfo: [NSLocalizedDescriptionKey: "No image sampler"]) }
         let epsilon = computeEpsilon()
-        var sdfs: [RegionalSDF] = []
         var images: [CGImage] = []
         for color in palette {
-            let (sdf, cg) = try makeSDF(for: color, sampler: imageSampler, epsilon: epsilon)
-            sdfs.append(sdf)
+            let cg = try makeSDF(for: color, sampler: imageSampler, epsilon: epsilon)
             if let cg { images.append(cg) }
         }
-        return (sdfs, images)
+        return images
     }
 
-    private func computeAllSDFsParallel() async -> (sdfs: [RegionalSDF], images: [CGImage]) {
-        guard let imageSampler else { return ([], []) }
+    private func computeAllSDFsParallel() async -> [CGImage] {
+        guard let imageSampler else { return [] }
         let epsilon = computeEpsilon()
+        if selectedDF == .DensityDF {
+            let rgbPalette = palette.map { $0.colorRGB }
+            let multi = MultiRegionalDF(sampler: imageSampler, regionColors: rgbPalette)
+            do {
+                try multi.computeDF()
+                if let cg = multi.densityAndDistanceFieldImage().toCGImage() {
+                    return [cg]
+                }
+            } catch {
+                Logger.shared.err("SDF failed: \(error.localizedDescription)")
+            }
+            return []
+        }
         // Run per-color computations in parallel
-        return await withTaskGroup(of: (Int, RegionalSDF?, CGImage?).self) { group in
+        return await withTaskGroup(of: (Int, CGImage?).self) { group in
             for index in 0..<palette.count {
                 let color = palette[index]
                 group.addTask {
                     do {
-                        let (sdf, cg) = try await makeSDF(for: color, sampler: imageSampler, epsilon: epsilon)
-                        return (index, sdf, cg)
+                        let cg = try await makeSDF(for: color, sampler: imageSampler, epsilon: epsilon)
+                        return (index, cg)
                     } catch {
                         await Logger.shared.err("SDF failed: \(error.localizedDescription)")
-                        return (index, nil, nil)
+                        return (index, nil)
                     }
                 }
             }
-            var rdfs: [RegionalSDF] = []
             var images: [CGImage] = []
             var order: [Int: Int] = [:]
             var i = 0
             for await result in group {
-                if let rdf = result.1, let cg = result.2 {
-                    rdfs.append(rdf)
+                if let cg = result.1 {
                     images.append(cg)
                     order[result.0] = i
                     i += 1
                 }
             }
             // sort using order
-            var sortedRdfs: [RegionalSDF] = []
             var sortedImages: [CGImage] = []
             let keys = order.keys.sorted()
             for k in keys {
                 let i = order[k]!
-                sortedRdfs.append(rdfs[i])
                 sortedImages.append(images[i])
             }
-            return (sortedRdfs, sortedImages)
+            return sortedImages
         }
     }
 
     private func computeAllSDFs() async {
         await MainActor.run { resetGeneratedOutputs() }
-        let (sdfs, images) = await computeAllSDFsParallel()
+        let images = await computeAllSDFsParallel()
         await MainActor.run {
-            self.generatedSDFs = sdfs
             self.generatedCGImages = images
         }
     }
