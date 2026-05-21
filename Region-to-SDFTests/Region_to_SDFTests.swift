@@ -347,6 +347,9 @@ struct Region_to_SDFTests {
         if let cgImage = multiregionalDF.colorAndDistanceImage(palette: palette).toCGImage() {
             saveImage(cgImage, path: "multiregionalDF_df_colors.png")
         }
+        if let cgImage = multiregionalDF.densityAndDistanceFieldImage().toCGImage() {
+            saveImage(cgImage, path: "multiregionalDF_df_DDF.png")
+        }
     }
 
     // Helper to get the test bundle via class lookup
