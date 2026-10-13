@@ -1,0 +1,14 @@
+{
+  "matching": "nearest",
+  "epsilon": 5,
+  "regions": [
+    {"name": "brown", "color": "#805710"},
+    {"name": "lightBrown", "color": "#f7c164"},
+    {"name": "yellow", "color": "#d8ea35"},
+    {"name": "blue", "color": "#2f8fec"},
+    {"name": "red", "color": "#b8274d"},
+    {"name": "green", "color": [10, 168, 14], "epsilon": 10},
+    {"name": "magenta", "color": "#cd10de"},
+    {"name": "black", "color": "#130c14"}
+  ]
+}
